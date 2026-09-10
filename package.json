@@ -1,0 +1,38 @@
+{
+  "name": "claude-pet",
+  "version": "1.0.0",
+  "description": "Claude Code 작업 상태를 보여주는 데스크톱 펫 오버레이",
+  "main": "main.js",
+  "author": "SR",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.sr.claudepet",
+    "productName": "Claude Pet",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "hooks/**/*",
+      "assets/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

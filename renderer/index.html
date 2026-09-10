@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<title>Claude Pet</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <div id="bubble" class="hidden"></div>
+    <div id="pet-root" class="state-idle character-robot">
+      <div id="pet-svg-slot"></div>
+      <div id="ring"></div>
+      <div id="orbit-dots">
+        <span></span><span></span><span></span>
+      </div>
+      <div id="badge-working">
+        <svg viewBox="0 0 24 24" width="14" height="14">
+          <rect x="2" y="4" width="20" height="16" rx="2" fill="#111" opacity="0.85"/>
+          <text x="5" y="16" font-size="10" fill="#7CFF9B" font-family="monospace">&gt;_</text>
+        </svg>
+      </div>
+    </div>
+    <div id="label"></div>
+  </div>
+  <script src="characters.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

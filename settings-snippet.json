@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "thinking"] }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "working"] }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "working"] }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "notify"] }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+        ]
+      }
+    ]
+  }
+}
