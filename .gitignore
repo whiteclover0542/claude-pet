@@ -29,3 +29,6 @@ desktop.ini
 # Env
 .env
 .env.local
+
+# 시트 분석 중간 산출물 (build-sheet-json.js 입력)
+tools/sheet-boxes.json

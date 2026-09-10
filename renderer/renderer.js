@@ -1,71 +1,205 @@
-const petRoot = document.getElementById('pet-root');
-const svgSlot = document.getElementById('pet-svg-slot');
-const label = document.getElementById('label');
+const petEl = document.getElementById('pet');
+const canvas = document.getElementById('pet-canvas');
+const bubble = document.getElementById('bubble');
+const titleEl = document.getElementById('bubble-title');
+const sourceEl = document.getElementById('bubble-source');
+const stateEl = document.getElementById('bubble-state');
+const bodyEl = document.getElementById('bubble-body');
+const dotsEl = document.getElementById('session-dots');
 
 const STATE_LABEL = {
   idle: '대기 중',
-  thinking: '생각하는 중…',
-  working: '작업 중…',
+  thinking: '생각 중',
+  working: '작업 중',
   notify: '확인해 주세요!'
 };
 
-let labelTimer = null;
+// 어디서 돌고 있는 세션인지 (트랜스크립트의 entrypoint 값)
+const SOURCE_LABEL = {
+  'claude-vscode': 'VSCode',
+  cli: '터미널',
+  sdk: 'SDK'
+};
 
-function applyCharacter(name) {
-  const build = window.PET_CHARACTERS[name] || window.PET_CHARACTERS.robot;
-  svgSlot.innerHTML = build();
+// 답변이 도착하면 말풍선 본문을 이 시간만큼 펼쳐 둔다
+const REPLY_VISIBLE_MS = 20000;
+// 대기 상태가 이만큼 지나면 말풍선을 접는다
+const IDLE_HIDE_MS = 6000;
+
+let sprite = null;
+let hideTimer = null;
+let replyTimer = null;
+let lastReplyAt = null;
+let pinned = false; // 마우스를 올리고 있으면 접지 않는다
+
+function setBubbleVisible(visible) {
+  bubble.classList.toggle('hidden', !visible);
 }
 
-function applyColor(hex) {
-  document.documentElement.style.setProperty('--pet-color', hex);
+function showReply(text) {
+  bodyEl.textContent = text;
+  bodyEl.classList.remove('hidden');
+  clearTimeout(replyTimer);
+  replyTimer = setTimeout(() => {
+    if (!pinned) bodyEl.classList.add('hidden');
+  }, REPLY_VISIBLE_MS);
 }
 
-function applyState(state) {
-  petRoot.classList.remove('state-idle', 'state-thinking', 'state-working', 'state-notify');
-  petRoot.classList.add(`state-${state}`);
+/** 상태별 두 번째 줄 문구 */
+function stateLine(session) {
+  const base = STATE_LABEL[session.state] || '';
+  if (session.state === 'working' && session.tool) return `${base} · ${session.tool}`;
+  // 생각 중일 땐 무엇을 물어봤는지 보여준다
+  if (session.state === 'thinking' && session.prompt) return session.prompt;
+  return base;
+}
 
-  label.textContent = STATE_LABEL[state] || '';
-  label.classList.add('visible');
-  clearTimeout(labelTimer);
-  // idle 상태 라벨은 잠시 후 자동으로 숨김 (평소엔 조용히 대기)
-  if (state === 'idle') {
-    labelTimer = setTimeout(() => label.classList.remove('visible'), 1800);
+function applySession(payload) {
+  const session = payload.session;
+
+  if (!session) {
+    // 돌아가는 세션이 없으면 조용히 대기
+    currentState = 'idle';
+    sprite && sprite.setState('idle');
+    petEl.classList.remove('notify');
+    setBubbleVisible(false);
+    dotsEl.classList.add('hidden');
+    return;
+  }
+
+  currentState = session.state;
+  sprite && sprite.setState(session.state);
+  petEl.classList.toggle('notify', session.state === 'notify');
+
+  titleEl.textContent = session.title || '새 채팅';
+  sourceEl.textContent = SOURCE_LABEL[session.entrypoint] || '';
+  stateEl.textContent = stateLine(session);
+
+  // 새 답변이 도착했을 때만 본문을 펼친다
+  if (session.reply && session.replyAt && session.replyAt !== lastReplyAt) {
+    lastReplyAt = session.replyAt;
+    showReply(session.reply);
+  }
+
+  // 여러 세션이 돌면 점으로 표시 (클릭하면 전환)
+  if (payload.count > 1) {
+    dotsEl.innerHTML = '';
+    for (let i = 0; i < payload.count; i++) {
+      const dot = document.createElement('span');
+      if (i === payload.index) dot.classList.add('active');
+      dotsEl.appendChild(dot);
+    }
+    dotsEl.classList.remove('hidden');
+  } else {
+    dotsEl.classList.add('hidden');
+  }
+
+  setBubbleVisible(true);
+  clearTimeout(hideTimer);
+  if (session.state === 'idle' && !pinned) {
+    hideTimer = setTimeout(() => {
+      if (!pinned) setBubbleVisible(false);
+    }, IDLE_HIDE_MS);
+  }
+}
+
+// --- 마우스가 실제 요소 위에 있을 때만 창이 클릭을 받도록 ------------------
+// 투명한 부분은 통과시켜야 뒤쪽 창을 정상적으로 클릭할 수 있다.
+let interactive = null;
+function updateInteractive(el) {
+  const want = !!(el && el.closest('[data-hit]'));
+  if (want === interactive) return;
+  interactive = want;
+  window.claudePet.setInteractive(want);
+}
+
+document.addEventListener('mousemove', (e) => {
+  updateInteractive(document.elementFromPoint(e.clientX, e.clientY));
+});
+document.addEventListener('mouseleave', () => updateInteractive(null));
+
+bubble.addEventListener('mouseenter', () => {
+  pinned = true;
+  clearTimeout(hideTimer);
+});
+bubble.addEventListener('mouseleave', () => {
+  pinned = false;
+});
+
+petEl.addEventListener('mouseenter', () => {
+  pinned = true;
+  clearTimeout(hideTimer);
+  setBubbleVisible(true);
+});
+petEl.addEventListener('mouseleave', () => {
+  pinned = false;
+});
+
+dotsEl.addEventListener('click', () => window.claudePet.cycleSession());
+
+// --- 펫을 끌어서 위치 옮기기 ----------------------------------------------
+let drag = null;
+petEl.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  drag = { startX: e.screenX, startY: e.screenY };
+  petEl.classList.add('dragging');
+});
+window.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  window.claudePet.dragWindowBy(e.screenX - drag.startX, e.screenY - drag.startY);
+  drag.startX = e.screenX;
+  drag.startY = e.screenY;
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return;
+  drag = null;
+  petEl.classList.remove('dragging');
+  window.claudePet.saveWindowPosition();
+});
+
+// --- 초기화 ---------------------------------------------------------------
+let loadedCharacter = null;
+let currentState = 'idle';
+
+/** 시트를 갈아끼운다. 실패하면 말풍선에 이유를 띄워 조용히 사라지지 않게 한다. */
+async function loadCharacter(name, height) {
+  try {
+    const next = await window.loadSprite(canvas, `../assets/characters/${name}.json`);
+    if (sprite) sprite.stop();
+    sprite = next;
+    loadedCharacter = name;
+    sprite.setDisplayHeight(height);
+    sprite.setState(currentState);
+    sprite.start();
+  } catch (e) {
+    titleEl.textContent = '캐릭터를 불러오지 못했습니다';
+    stateEl.textContent = `${name}.json — ${e.message || e}`;
+    setBubbleVisible(true);
   }
 }
 
 async function init() {
   const cfg = await window.claudePet.getConfig();
-  const status = await window.claudePet.getStatus();
-
-  petRoot.className = `state-${status.state} character-${cfg.character}`;
-  applyCharacter(cfg.character);
-  applyColor(cfg.color);
-  applyState(status.state);
+  await loadCharacter(cfg.character, cfg.petHeight);
+  applySession(await window.claudePet.getActiveSession());
 }
 
-window.claudePet.onConfigUpdated((cfg) => {
-  applyCharacter(cfg.character);
-  applyColor(cfg.color);
+window.claudePet.onConfigUpdated(async (cfg) => {
+  if (cfg.character !== loadedCharacter) {
+    await loadCharacter(cfg.character, cfg.petHeight);
+    return;
+  }
+  sprite && sprite.setDisplayHeight(cfg.petHeight);
 });
 
-window.claudePet.onStatusUpdated((status) => {
-  applyState(status.state);
-});
+window.claudePet.onSessionUpdated(applySession);
 
 window.claudePet.onSetupResult((result) => {
-  label.textContent = result.ok ? 'Claude Code 연동 완료 ✓' : '연동 실패';
-  label.classList.add('visible');
-  clearTimeout(labelTimer);
-  labelTimer = setTimeout(() => label.classList.remove('visible'), 2500);
-});
-
-// 클릭하면 잠깐 상태 라벨을 보여줌 (마우스오버 대용)
-petRoot.addEventListener('mouseenter', () => label.classList.add('visible'));
-petRoot.addEventListener('mouseleave', () => {
-  if (!petRoot.classList.contains('state-notify')) {
-    clearTimeout(labelTimer);
-    labelTimer = setTimeout(() => label.classList.remove('visible'), 400);
-  }
+  titleEl.textContent = result.ok ? 'Claude Code 연동 완료' : '연동 실패';
+  stateEl.textContent = result.ok ? result.path : String(result.error || '');
+  setBubbleVisible(true);
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => setBubbleVisible(false), 4000);
 });
 
 init();

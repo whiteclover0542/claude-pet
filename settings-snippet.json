@@ -4,7 +4,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "thinking"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "thinking"
+            ]
+          }
         ]
       }
     ],
@@ -12,7 +19,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "working"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "working"
+            ]
+          }
         ]
       }
     ],
@@ -20,7 +34,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "working"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "working"
+            ]
+          }
         ]
       }
     ],
@@ -28,7 +49,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "notify"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "notify"
+            ]
+          }
         ]
       }
     ],
@@ -36,7 +64,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "idle"
+            ]
+          }
         ]
       }
     ],
@@ -44,7 +79,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "idle"
+            ]
+          }
         ]
       }
     ],
@@ -52,7 +94,14 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["/Users/YOUR_NAME/.claude-pet/hooks/report-status.js", "idle"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "<홈>/.claude-pet/hooks/report-status.js",
+              "end"
+            ]
+          }
         ]
       }
     ]

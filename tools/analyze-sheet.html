@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'bichon-sheet.webp');
+
+// 알파가 이 값보다 크면 "잉크"로 본다. 손실 압축 가장자리 잔여물을 걸러낸다.
+const ALPHA_MIN = 40;
+// 이만큼 연속으로 비어 있으면 행/프레임 경계로 본다.
+const ROW_GAP = 6;
+const COL_GAP = 8;
+// 압축 노이즈로 생긴 자잘한 점은 프레임으로 치지 않는다.
+const MIN_BOX = 24;
+
+/** 1차원 카운트 배열에서 값이 있는 구간들을 찾는다 */
+function runs(counts, minGap) {
+  const out = [];
+  let start = -1;
+  let gap = 0;
+  for (let i = 0; i < counts.length; i++) {
+    if (counts[i] > 0) {
+      if (start < 0) start = i;
+      gap = 0;
+    } else if (start >= 0) {
+      gap++;
+      if (gap >= minGap) {
+        out.push([start, i - gap]);
+        start = -1;
+        gap = 0;
+      }
+    }
+  }
+  if (start >= 0) out.push([start, counts.length - 1]);
+  return out;
+}
+
+(async () => {
+  try {
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+
+    const W = img.naturalWidth;
+    const H = img.naturalHeight;
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, W, H).data;
+
+    const ink = (x, y) => data[(y * W + x) * 4 + 3] >= ALPHA_MIN;
+
+    // 1. 가로 띠(행) 찾기
+    const rowCounts = new Array(H).fill(0);
+    for (let y = 0; y < H; y++) {
+      let c = 0;
+      for (let x = 0; x < W; x++) if (ink(x, y)) c++;
+      rowCounts[y] = c;
+    }
+
+    const rows = [];
+    runs(rowCounts, ROW_GAP).forEach(([y0, y1]) => {
+      // 2. 띠 안에서 세로로 잘라 프레임 덩어리 찾기
+      const colCounts = new Array(W).fill(0);
+      for (let x = 0; x < W; x++) {
+        let c = 0;
+        for (let y = y0; y <= y1; y++) if (ink(x, y)) c++;
+        colCounts[x] = c;
+      }
+
+      const boxes = [];
+      runs(colCounts, COL_GAP).forEach(([x0, x1]) => {
+        // 3. 각 덩어리의 실제 경계로 조인다
+        let minX = x1, maxX = x0, minY = y1, maxY = y0;
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            if (!ink(x, y)) continue;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+        const w = maxX - minX + 1;
+        const h = maxY - minY + 1;
+        if (w < MIN_BOX || h < MIN_BOX) return;
+        boxes.push({ x: minX, y: minY, w, h });
+      });
+
+      if (!boxes.length) return;
+      rows.push({
+        y: y0,
+        h: y1 - y0 + 1,
+        cellW: Math.max(...boxes.map((b) => b.w)),
+        cellH: Math.max(...boxes.map((b) => b.h)),
+        boxes
+      });
+    });
+
+    ipcRenderer.send('result', { width: W, height: H, rows });
+  } catch (e) {
+    ipcRenderer.send('result', { error: String(e && e.stack || e) });
+  }
+})();
+</script>
+</body>
+</html>

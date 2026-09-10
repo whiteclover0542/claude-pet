@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'bichon-sheet.webp');
+const BOXES = path.join(__dirname, 'sheet-boxes.json');
+
+const ROW_H = 96;   // 각 행을 이 높이로 맞춰 그린다
+const GAP = 10;
+const LABEL_W = 70;
+
+(async () => {
+  try {
+    const meta = JSON.parse(fs.readFileSync(BOXES, 'utf-8'));
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+
+    // 행마다 스케일을 맞추고 전체 크기를 먼저 계산
+    const layout = meta.rows.map((row) => {
+      const scale = ROW_H / row.cellH;
+      const width = row.boxes.reduce((sum, b) => sum + b.w * scale + GAP, GAP);
+      return { row, scale, width };
+    });
+
+    const W = Math.ceil(LABEL_W + Math.max(...layout.map((l) => l.width)));
+    const H = Math.ceil(layout.length * (ROW_H + GAP) + GAP);
+
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = '#1c1c22';
+    ctx.fillRect(0, 0, W, H);
+
+    layout.forEach(({ row, scale }, i) => {
+      const top = GAP + i * (ROW_H + GAP);
+
+      ctx.fillStyle = i % 2 ? '#232329' : '#1c1c22';
+      ctx.fillRect(0, top - GAP / 2, W, ROW_H + GAP);
+
+      ctx.fillStyle = '#8ab4ff';
+      ctx.font = 'bold 20px system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`행 ${i}`, 10, top + ROW_H / 2 - 10);
+      ctx.fillStyle = '#6b6b78';
+      ctx.font = '14px system-ui, sans-serif';
+      ctx.fillText(`${row.boxes.length}컷`, 12, top + ROW_H / 2 + 14);
+
+      let x = LABEL_W + GAP;
+      row.boxes.forEach((b) => {
+        const w = b.w * scale;
+        const h = b.h * scale;
+        // 발을 바닥에 맞춰 정렬 (아래쪽 기준)
+        ctx.drawImage(img, b.x, b.y, b.w, b.h, x, top + (ROW_H - h), w, h);
+        x += w + GAP;
+      });
+    });
+
+    ipcRenderer.send('png', cv.toDataURL('image/png'));
+  } catch (e) {
+    ipcRenderer.send('png', `ERR ${e && e.stack || e}`);
+  }
+})();
+</script>
+</body>
+</html>
