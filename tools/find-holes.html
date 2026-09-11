@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.webp');
+const BOXES = path.join(__dirname, 'sheet-boxes.json');
+
+// 알파가 이 값보다 낮으면 "뚫렸다"고 본다
+const HOLE_ALPHA = 60;
+const OPAQUE_ALPHA = 200;
+// 상하좌우 4방향 전부에서 이 거리 안에 불투명 픽셀을 만나야 "완전히
+// 둘러싸인 구멍"으로 본다. 실루엣 가장자리는 바깥쪽 방향으로는 끝까지
+// 투명하므로 이 조건에 걸리지 않는다.
+const ENCLOSE_DIST = 22;
+
+(async () => {
+  try {
+    const meta = JSON.parse(fs.readFileSync(BOXES, 'utf-8'));
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const { data, width } = ctx.getImageData(0, 0, cv.width, cv.height);
+    const alphaAt = (x, y) => data[(y * width + x) * 4 + 3];
+
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    function isEnclosedHole(x, y) {
+      return DIRS.every(([dx, dy]) => {
+        for (let d = 1; d <= ENCLOSE_DIST; d++) {
+          if (alphaAt(x + dx * d, y + dy * d) >= OPAQUE_ALPHA) return true;
+        }
+        return false;
+      });
+    }
+
+    const holes = [];
+    meta.rows.forEach((row, rowIdx) => {
+      row.boxes.forEach((b, colIdx) => {
+        const pad = 2;
+        for (let y = b.y + pad; y < b.y + b.h - pad; y++) {
+          for (let x = b.x + pad; x < b.x + b.w - pad; x++) {
+            if (alphaAt(x, y) >= HOLE_ALPHA) continue;
+            if (isEnclosedHole(x, y)) holes.push({ row: rowIdx, col: colIdx, x, y });
+          }
+        }
+      });
+    });
+
+    // --- 시각화: 원본 위에 구멍 픽셀을 빨간색으로 표시한 PNG를 만든다 ---
+    const markCv = document.createElement('canvas');
+    markCv.width = cv.width;
+    markCv.height = cv.height;
+    const markCtx = markCv.getContext('2d');
+    // 밝은 회색 배경 위에 원본을 그려서 실제 투명/불투명이 잘 보이게
+    markCtx.fillStyle = '#c8c8cc';
+    markCtx.fillRect(0, 0, markCv.width, markCv.height);
+    markCtx.drawImage(img, 0, 0);
+    markCtx.fillStyle = 'red';
+    holes.forEach((h) => markCtx.fillRect(h.x - 1, h.y - 1, 3, 3));
+
+    const byFrame = {};
+    holes.forEach((h) => {
+      const key = `${h.row}-${h.col}`;
+      if (!byFrame[key]) byFrame[key] = { row: h.row, col: h.col, count: 0, sample: h };
+      byFrame[key].count++;
+    });
+
+    ipcRenderer.send('result', {
+      summary: Object.values(byFrame),
+      markedPng: markCv.toDataURL('image/png')
+    });
+  } catch (e) {
+    ipcRenderer.send('result', { error: String(e && e.stack || e) });
+  }
+})();
+</script>
+</body>
+</html>

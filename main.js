@@ -422,25 +422,50 @@ ipcMain.on('set-interactive', (_e, on) => {
   mainWindow.setIgnoreMouseEvents(!on, { forward: true });
 });
 
+/**
+ * 창을 (nx,ny)로 옮겼을 때 펫이 실제로 보이는 영역(offset만큼 안쪽)이
+ * 화면 밖으로 완전히 나가지만 않으면 그대로 이동을 허용한다.
+ *
+ * 예전엔 "가장 가까운 디스플레이 하나"의 workArea로만 clamp했는데, 그
+ * 기준점이 창의 왼쪽-위 좌표(nx,ny)였다. 펫이 모니터 경계를 넘어가려는
+ * 순간 nx는 아직 원래 모니터 안에 있으니 즉시 그 모니터 안으로 되돌려져
+ * 버려서, 듀얼 모니터에서 펫이 절대 옆 모니터로 못 넘어가는 문제가 있었다.
+ * 지금은 "펫 사각형이 어느 디스플레이와든 겹치기만 하면 허용"으로 바꿔서
+ * 모니터 사이를 자유롭게 오갈 수 있다.
+ */
+function clampPetVisible(nx, ny, w, h, offset) {
+  const o = offset || { top: 0, left: 0, right: 0, bottom: 0 };
+  const pet = { x: nx + o.left, y: ny + o.top, width: w - o.left - o.right, height: h - o.top - o.bottom };
+  const overlaps = (a, b) =>
+    Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) &&
+    Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y);
+
+  if (screen.getAllDisplays().some((d) => overlaps(pet, d.workArea))) {
+    return { x: nx, y: ny };
+  }
+
+  // 완전히 화면 밖으로 나가려 하면, 펫 중심에서 가장 가까운 디스플레이의
+  // workArea 경계 안으로 되돌린다.
+  const center = { x: Math.round(pet.x + pet.width / 2), y: Math.round(pet.y + pet.height / 2) };
+  const { workArea } = screen.getDisplayNearestPoint(center);
+  const minX = workArea.x - o.left;
+  const maxX = workArea.x + workArea.width - w + o.right;
+  const minY = workArea.y - o.top;
+  const maxY = workArea.y + workArea.height - h + o.bottom;
+  return {
+    x: Math.round(Math.min(Math.max(nx, minX), Math.max(minX, maxX))),
+    y: Math.round(Math.min(Math.max(ny, minY), Math.max(minY, maxY)))
+  };
+}
+
 ipcMain.on('drag-window-by', (_e, { dx, dy, offset }) => {
   if (!mainWindow) return;
   const [x, y] = mainWindow.getPosition();
   const [w, h] = mainWindow.getSize();
   const nx = Math.round(x + dx);
   const ny = Math.round(y + dy);
-
-  // 창 자체는 말풍선·설정 패널까지 담느라 펫보다 훨씬 크다. 창 경계로
-  // clamp하면 펫이 코너 근처에도 못 가고 막히므로, 펫이 실제로 보이는
-  // 영역(offset만큼 안쪽)만 작업표시줄을 포함한 workArea 안에 있으면 된다.
-  const o = offset || { top: 0, left: 0, right: 0, bottom: 0 };
-  const { workArea } = screen.getDisplayNearestPoint({ x: nx, y: ny });
-  const minX = workArea.x - o.left;
-  const maxX = workArea.x + workArea.width - w + o.right;
-  const minY = workArea.y - o.top;
-  const maxY = workArea.y + workArea.height - h + o.bottom;
-  const clampedX = Math.round(Math.min(Math.max(nx, minX), Math.max(minX, maxX)));
-  const clampedY = Math.round(Math.min(Math.max(ny, minY), Math.max(minY, maxY)));
-  mainWindow.setPosition(clampedX, clampedY);
+  const clamped = clampPetVisible(nx, ny, w, h, offset);
+  mainWindow.setPosition(clamped.x, clamped.y);
 });
 
 ipcMain.on('save-window-position', () => {

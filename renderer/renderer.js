@@ -4,7 +4,6 @@ const bubble = document.getElementById('bubble');
 const titleEl = document.getElementById('bubble-title');
 const sourceEl = document.getElementById('bubble-source');
 const stateEl = document.getElementById('bubble-state');
-const bodyEl = document.getElementById('bubble-body');
 const dotsEl = document.getElementById('session-dots');
 const gearEl = document.getElementById('gear-btn');
 const panelEl = document.getElementById('settings-panel');
@@ -29,8 +28,6 @@ const SOURCE_LABEL = {
   sdk: 'SDK'
 };
 
-// 답변이 도착하면 말풍선 본문을 이 시간만큼 펼쳐 둔다
-const REPLY_VISIBLE_MS = 20000;
 // 대기 상태가 이만큼 지나면 말풍선을 접는다
 const IDLE_HIDE_MS = 6000;
 // 펫을 눌렀다 뗄 때, 이 거리 안에서 멈추면 드래그가 아니라 클릭으로 본다
@@ -51,7 +48,6 @@ const CLIP_TICK_MS = 500; // 시간 기반 전환(시무룩해지기 등)을 재
 
 let sprite = null;
 let hideTimer = null;
-let replyTimer = null;
 let lastReplyAt = null;
 let pinned = false; // 마우스를 올리고 있으면 말풍선을 접지 않는다
 let hasSession = false; // 돌아가는 세션이 있어야만 마우스오버로 말풍선을 연다
@@ -114,15 +110,6 @@ function setBubbleVisible(visible) {
   bubble.classList.toggle('hidden', !visible);
 }
 
-function showReply(text) {
-  bodyEl.textContent = text;
-  bodyEl.classList.remove('hidden');
-  clearTimeout(replyTimer);
-  replyTimer = setTimeout(() => {
-    if (!pinned) bodyEl.classList.add('hidden');
-  }, REPLY_VISIBLE_MS);
-}
-
 function truncate(text, max) {
   if (!text) return '';
   const t = String(text).trim();
@@ -171,10 +158,9 @@ function applySession(payload) {
   sourceEl.textContent = SOURCE_LABEL[session.entrypoint] || '';
   stateEl.textContent = stateLine(session);
 
-  // 새 답변이 도착했을 때만 본문을 펼치고, 펫도 잠깐 반긴다
+  // 새 답변이 도착하면 펫이 잠깐 반긴다 (말풍선 제목에는 이미 요약이 뜬다)
   if (session.reply && session.replyAt && session.replyAt !== lastReplyAt) {
     lastReplyAt = session.replyAt;
-    showReply(session.reply);
     jumpUntil = Date.now() + JUMP_DURATION_MS;
   }
 

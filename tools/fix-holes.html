@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+// 재사용할 땐 이 경로를 문제가 있는 원본 파일로 바꾼다 (아래 fix-holes.js
+// 주석 참고). 지금은 참조용 예시로 mong-sheet.webp를 가리켜 둔다.
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.webp');
+const BOXES = path.join(__dirname, 'sheet-boxes.json');
+
+const HOLE_ALPHA = 60;
+const OPAQUE_ALPHA = 200;
+const ENCLOSE_DIST = 22;
+
+(async () => {
+  try {
+    const meta = JSON.parse(fs.readFileSync(BOXES, 'utf-8'));
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const imgData = ctx.getImageData(0, 0, cv.width, cv.height);
+    const { data, width } = imgData;
+    const idx = (x, y) => (y * width + x) * 4;
+    const alphaAt = (x, y) => data[idx(x, y) + 3];
+
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    /** 그 방향으로 처음 만나는 불투명 픽셀까지의 [dist, r,g,b] */
+    function firstOpaque(x, y, dx, dy) {
+      for (let d = 1; d <= ENCLOSE_DIST; d++) {
+        const nx = x + dx * d, ny = y + dy * d;
+        if (alphaAt(nx, ny) >= OPAQUE_ALPHA) {
+          const i = idx(nx, ny);
+          return { d, r: data[i], g: data[i + 1], b: data[i + 2] };
+        }
+      }
+      return null;
+    }
+    function isEnclosedHole(x, y) {
+      return DIRS.every(([dx, dy]) => firstOpaque(x, y, dx, dy) !== null);
+    }
+
+    // 1. 구멍 픽셀 전부 찾기
+    const holes = [];
+    meta.rows.forEach((row) => {
+      row.boxes.forEach((b) => {
+        const pad = 2;
+        for (let y = b.y + pad; y < b.y + b.h - pad; y++) {
+          for (let x = b.x + pad; x < b.x + b.w - pad; x++) {
+            if (alphaAt(x, y) >= HOLE_ALPHA) continue;
+            if (isEnclosedHole(x, y)) holes.push({ x, y });
+          }
+        }
+      });
+    });
+
+    // 2. 각 구멍을 채운다. 눈·코 구멍 주변에는 "눈동자/코 자체의 진한 색"과
+    // "그 바깥 흰 털"이 섞여 있는데, 평균을 내면 흐린 회색이 되어 버린다.
+    // 그래서 4방향 중 가장 어두운(밝기가 낮은) 색을 그대로 채택한다 —
+    // 구멍은 원래 진한 색이었을 가능성이 높기 때문.
+    function luma(r, g, b) { return 0.299 * r + 0.587 * g + 0.114 * b; }
+    holes.forEach(({ x, y }) => {
+      let best = null;
+      DIRS.forEach(([dx, dy]) => {
+        const hit = firstOpaque(x, y, dx, dy);
+        if (!hit) return;
+        if (!best || luma(hit.r, hit.g, hit.b) < luma(best.r, best.g, best.b)) best = hit;
+      });
+      if (!best) return;
+      const i = idx(x, y);
+      data[i] = best.r;
+      data[i + 1] = best.g;
+      data[i + 2] = best.b;
+      data[i + 3] = 255;
+    });
+
+    ctx.putImageData(imgData, 0, 0);
+
+    ipcRenderer.send('result', {
+      holeCount: holes.length,
+      png: cv.toDataURL('image/png')
+    });
+  } catch (e) {
+    ipcRenderer.send('result', { error: String(e && e.stack || e) });
+  }
+})();
+</script>
+</body>
+</html>

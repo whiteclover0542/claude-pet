@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.webp');
+
+(async () => {
+  try {
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+    ipcRenderer.send('result', { width: img.naturalWidth, height: img.naturalHeight });
+  } catch (e) {
+    ipcRenderer.send('result', { error: String(e && e.stack || e) });
+  }
+})();
+</script>
+</body>
+</html>
