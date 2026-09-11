@@ -78,15 +78,21 @@ JSON은 원본 이미지를 자르지 않고 좌표만 담기 때문에 화질 �
 # 1. 시트를 넣는다
 cp 내시트.webp assets/characters/mydog-sheet.webp
 
-# 2. 알파 채널을 보고 프레임 격자를 자동으로 찾는다
+# 2. tools/analyze-sheet.html, tools/preview-rows.html 안의
+#    SHEET 상수를 방금 넣은 파일명으로 고친다
+
+# 3. 알파 채널을 보고 프레임 격자를 자동으로 찾는다
 env -u ELECTRON_RUN_AS_NODE npx electron tools/analyze-sheet.js
 
-# 3. 어떤 행이 어떤 동작인지 눈으로 확인한다
+# 4. 어떤 행이 어떤 동작인지 눈으로 확인한다
 env -u ELECTRON_RUN_AS_NODE npx electron tools/preview-rows.js
 
-# 4. tools/build-sheet-json.js의 CLIPS/STATES를 고친 뒤 실행
-node tools/build-sheet-json.js
+# 5. 캐릭터ID·표시이름·시트파일명을 넣어 JSON을 만든다
+node tools/build-sheet-json.js mydog 마이독 mydog-sheet.webp
 ```
+
+행 구성이 지금까지 받은 시트들과 다르면 `tools/build-sheet-json.js`의
+`CLIPS`/`STATES` 상수도 손봐야 합니다.
 
 행마다 프레임 수와 크기가 달라도 됩니다. 프레임은 **아래-가운데** 기준으로
 정렬되므로 앉은 자세와 선 자세의 키 차이가 자연스럽게 유지됩니다.

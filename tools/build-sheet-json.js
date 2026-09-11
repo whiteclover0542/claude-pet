@@ -1,17 +1,27 @@
 /**
  * analyze-sheet가 찾아낸 프레임 상자를 앱이 쓰는 sheet.json으로 바꾼다.
  *
- *   node tools/build-sheet-json.js
- *   → assets/characters/bichon.json
+ *   node tools/build-sheet-json.js <캐릭터ID> <표시이름> <시트파일명>
+ *   예)  node tools/build-sheet-json.js mong 몽이 mong-sheet.webp
+ *   → assets/characters/<캐릭터ID>.json
  *
  * 원본 webp를 자르지 않고 좌표만 기록하므로 재인코딩 품질 손실이 없다.
+ * analyze-sheet.js를 먼저 그 시트에 대해 돌려서 tools/sheet-boxes.json을
+ * 만들어 둬야 한다.
  */
 const fs = require('fs');
 const path = require('path');
 
+const [, , charId, displayName, sheetFile] = process.argv;
+if (!charId || !displayName || !sheetFile) {
+  console.error('사용법: node tools/build-sheet-json.js <캐릭터ID> <표시이름> <시트파일명>');
+  process.exit(1);
+}
+
 const boxes = JSON.parse(fs.readFileSync(path.join(__dirname, 'sheet-boxes.json'), 'utf-8'));
 
-// 시트의 어느 행이 어떤 동작인지 (preview-rows.js로 눈으로 확인한 결과)
+// 시트의 어느 행이 어떤 동작인지 (preview-rows.js로 눈으로 확인한 결과).
+// 지금까지 받은 시트들은 모두 이 11행 구성을 그대로 따른다.
 const CLIPS = [
   { name: 'idle', row: 0, fps: 5, label: '앉아서 눈 깜빡' },
   { name: 'walk', row: 1, fps: 10, label: '옆으로 총총 걷기' },
@@ -50,8 +60,8 @@ CLIPS.forEach(({ name, row, fps, label }) => {
 });
 
 const out = {
-  name: '비숑',
-  image: 'bichon-sheet.webp',
+  name: displayName,
+  image: sheetFile,
   sheetWidth: boxes.width,
   sheetHeight: boxes.height,
   // 프레임은 발이 바닥에 닿도록 아래-가운데 기준으로 정렬한다
@@ -60,7 +70,7 @@ const out = {
   clips
 };
 
-const dest = path.join(__dirname, '..', 'assets', 'characters', 'bichon.json');
+const dest = path.join(__dirname, '..', 'assets', 'characters', `${charId}.json`);
 fs.writeFileSync(dest, JSON.stringify(out, null, 2));
 console.log(`${dest}`);
 Object.entries(clips).forEach(([name, c]) => {

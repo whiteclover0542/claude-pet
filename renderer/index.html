@@ -22,6 +22,20 @@
     <div id="pet" data-hit>
       <canvas id="pet-canvas"></canvas>
     </div>
+
+    <!-- 펫을 클릭하면 열리는 설정 패널 (크기 조절 + 캐릭터 선택) -->
+    <div id="settings-panel" class="hidden" data-hit>
+      <div class="settings-row">
+        <span class="settings-label">크기</span>
+        <button id="scale-down" type="button" aria-label="작게">−</button>
+        <span id="scale-value">100%</span>
+        <button id="scale-up" type="button" aria-label="크게">+</button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">캐릭터</span>
+        <div id="character-list"></div>
+      </div>
+    </div>
   </div>
 
   <script src="sprite.js"></script>

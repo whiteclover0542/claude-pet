@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('claudePet', {
 
   // 투명한 영역은 클릭이 뒤쪽 창으로 통과하도록 토글한다
   setInteractive: (on) => ipcRenderer.send('set-interactive', on),
-  dragWindowBy: (dx, dy) => ipcRenderer.send('drag-window-by', { dx, dy }),
+  dragWindowBy: (dx, dy, offset) => ipcRenderer.send('drag-window-by', { dx, dy, offset }),
   saveWindowPosition: () => ipcRenderer.send('save-window-position'),
 
   onConfigUpdated: (cb) => ipcRenderer.on('config-updated', (_e, cfg) => cb(cfg)),

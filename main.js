@@ -17,18 +17,19 @@ const HOOK_SCRIPT_DEST = path.join(HOOKS_DIR, 'report-status.js');
 const HOOK_SCRIPT_SRC = path.join(__dirname, 'hooks', 'report-status.js');
 
 const DEFAULT_CONFIG = {
-  character: 'bichon',
+  character: 'mong',
   corner: 'bottom-right', // 저장된 위치가 없을 때만 쓰인다
   x: null,
   y: null,
   scale: 1.0 // 0.5 ~ 2.0
 };
 
-// 스프라이트 기준 칸 크기 (assets/characters/bichon.json의 최대 셀)
-const SPRITE_REF = { w: 160, h: 174 };
+// 시트 로딩에 실패했을 때만 쓰는 기본 비율
+const FALLBACK_ASPECT = { w: 160, h: 174 };
 const BASE_PET_HEIGHT = 150; // scale 1.0일 때 펫 높이(px)
 const BUBBLE_W = 330;
 const BUBBLE_SPACE = 210; // 말풍선이 펼쳐졌을 때 필요한 위쪽 여백
+const PANEL_SPACE = 130; // 펫을 클릭해서 여는 설정 패널에 필요한 아래쪽 여백
 
 // 이 시간 이상 갱신이 없는 세션은 죽은 것으로 보고 무시한다
 const SESSION_STALE_MS = 15 * 60 * 1000;
@@ -86,18 +87,34 @@ function writeConfig(partial) {
   return merged;
 }
 
-/** 설정을 렌더러가 바로 쓸 수 있는 형태로 (계산된 픽셀 크기 포함) */
+/** 설정을 렌더러가 바로 쓸 수 있는 형태로 (계산된 픽셀 크기 + 캐릭터 목록 포함) */
 function viewConfig() {
   const cfg = readConfig();
-  return { ...cfg, petHeight: Math.round(BASE_PET_HEIGHT * cfg.scale) };
+  const characters = availableCharacters().map((id) => {
+    const def = readJsonSafe(path.join(__dirname, 'assets', 'characters', `${id}.json`), {});
+    return { id, name: def.name || id };
+  });
+  return { ...cfg, petHeight: Math.round(BASE_PET_HEIGHT * cfg.scale), characters };
 }
 
-function windowSize(scale) {
+/** 캐릭터 시트에서 실제 가로세로 비율을 구한다 (sprite.js와 같은 계산 방식) */
+function characterAspect(charId) {
+  const def = readJsonSafe(path.join(__dirname, 'assets', 'characters', `${charId}.json`), null);
+  const clips = def && def.clips && Object.values(def.clips);
+  if (!clips || !clips.length) return FALLBACK_ASPECT;
+  return {
+    w: Math.max(...clips.map((c) => c.cellW)),
+    h: Math.max(...clips.map((c) => c.cellH))
+  };
+}
+
+function windowSize(charId, scale) {
+  const aspect = characterAspect(charId);
   const petH = Math.round(BASE_PET_HEIGHT * scale);
-  const petW = Math.round((SPRITE_REF.w * petH) / SPRITE_REF.h);
+  const petW = Math.round((aspect.w * petH) / aspect.h);
   return {
     width: Math.max(petW, BUBBLE_W) + 16,
-    height: petH + BUBBLE_SPACE
+    height: petH + BUBBLE_SPACE + PANEL_SPACE
   };
 }
 
@@ -169,7 +186,7 @@ function resolvePosition(cfg, size) {
 
 function createWindow() {
   const cfg = readConfig();
-  const size = windowSize(cfg.scale);
+  const size = windowSize(cfg.character, cfg.scale);
   const pos = resolvePosition(cfg, size);
 
   mainWindow = new BrowserWindow({
@@ -202,11 +219,14 @@ function createWindow() {
   });
 }
 
-/** 크기가 바뀌면 창을 다시 재고, 화면 밖으로 나가지 않게 맞춘다 */
-function applyScale(scale) {
-  const cfg = writeConfig({ scale });
+/**
+ * 크기나 캐릭터처럼 창 치수에 영향을 주는 설정을 바꾼다.
+ * 창을 다시 재고, 화면 밖으로 나가지 않게 맞춘다.
+ */
+function applySizingConfig(partial) {
+  const cfg = writeConfig(partial);
   if (!mainWindow) return cfg;
-  const size = windowSize(scale);
+  const size = windowSize(cfg.character, cfg.scale);
   const [x, y] = mainWindow.getPosition();
   const { workArea } = screen.getDisplayNearestPoint({ x, y });
   const nx = Math.min(x, workArea.x + workArea.width - size.width - 8);
@@ -301,7 +321,7 @@ function buildTrayMenu() {
     type: 'radio',
     checked: Math.abs(cfg.scale - scale) < 0.001,
     click: () => {
-      applyScale(scale);
+      applySizingConfig({ scale });
       tray && tray.setContextMenu(buildTrayMenu());
     }
   }));
@@ -314,7 +334,8 @@ function buildTrayMenu() {
   ].map(([label, corner]) => ({
     label,
     click: () => {
-      const size = windowSize(readConfig().scale);
+      const c = readConfig();
+      const size = windowSize(c.character, c.scale);
       const pos = defaultPosition(corner, size);
       mainWindow && mainWindow.setPosition(pos.x, pos.y);
       writeConfig({ corner, x: pos.x, y: pos.y });
@@ -329,8 +350,7 @@ function buildTrayMenu() {
       type: 'radio',
       checked: cfg.character === name,
       click: () => {
-        writeConfig({ character: name });
-        mainWindow && mainWindow.webContents.send('config-updated', viewConfig());
+        applySizingConfig({ character: name });
         tray && tray.setContextMenu(buildTrayMenu());
       }
     };
@@ -377,7 +397,7 @@ function createTray() {
 // ---------------------------------------------------------------------------
 ipcMain.handle('get-config', () => viewConfig());
 ipcMain.handle('set-config', (_e, partial) => {
-  if (partial && typeof partial.scale === 'number') return applyScale(partial.scale);
+  if (partial && (typeof partial.scale === 'number' || partial.character)) return applySizingConfig(partial);
   const updated = writeConfig(partial);
   tray && tray.setContextMenu(buildTrayMenu());
   return updated;
@@ -398,10 +418,25 @@ ipcMain.on('set-interactive', (_e, on) => {
   mainWindow.setIgnoreMouseEvents(!on, { forward: true });
 });
 
-ipcMain.on('drag-window-by', (_e, { dx, dy }) => {
+ipcMain.on('drag-window-by', (_e, { dx, dy, offset }) => {
   if (!mainWindow) return;
   const [x, y] = mainWindow.getPosition();
-  mainWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
+  const [w, h] = mainWindow.getSize();
+  const nx = Math.round(x + dx);
+  const ny = Math.round(y + dy);
+
+  // 창 자체는 말풍선·설정 패널까지 담느라 펫보다 훨씬 크다. 창 경계로
+  // clamp하면 펫이 코너 근처에도 못 가고 막히므로, 펫이 실제로 보이는
+  // 영역(offset만큼 안쪽)만 작업표시줄을 포함한 workArea 안에 있으면 된다.
+  const o = offset || { top: 0, left: 0, right: 0, bottom: 0 };
+  const { workArea } = screen.getDisplayNearestPoint({ x: nx, y: ny });
+  const minX = workArea.x - o.left;
+  const maxX = workArea.x + workArea.width - w + o.right;
+  const minY = workArea.y - o.top;
+  const maxY = workArea.y + workArea.height - h + o.bottom;
+  const clampedX = Math.round(Math.min(Math.max(nx, minX), Math.max(minX, maxX)));
+  const clampedY = Math.round(Math.min(Math.max(ny, minY), Math.max(minY, maxY)));
+  mainWindow.setPosition(clampedX, clampedY);
 });
 
 ipcMain.on('save-window-position', () => {
