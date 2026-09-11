@@ -225,11 +225,22 @@ function createWindow() {
     }
   });
 
-  mainWindow.setAlwaysOnTop(true, 'floating');
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // 기본은 통과. 렌더러가 펫/말풍선 위에 마우스가 올라올 때만 켠다.
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Windows는 topmost 창이 여러 개 있으면 "나중에 topmost 플래그가 다시
+  // 세팅된 쪽"이 위로 올라온다. 스스로 계속 topmost를 거는 게임 등과
+  // 마주치면 결국 밀릴 수 있지만(이런 경우는 Electron 표준 API로는
+  // 이기기 어려운 근본적 한계), 평소 일반 앱들 사이에서는 이 주기적
+  // 재적용만으로 충분히 맨 위를 유지한다.
+  setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  }, 2500);
 
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.send('config-updated', viewConfig());
