@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.png');
+
+// 마젠타(크로마키 배경 잔여물) 판정: R, B가 G보다 이만큼 이상 높으면 오염.
+const MAGENTA_GAP = 35;
+// 대체색을 찾을 때 이 거리까지 4방향으로 훑는다.
+const SEARCH_DIST = 20;
+
+(async () => {
+  try {
+    const img = new Image();
+    img.src = `file:///${SHEET.replace(/\\/g, '/')}`;
+    await img.decode();
+
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const imgData = ctx.getImageData(0, 0, cv.width, cv.height);
+    const { data, width, height } = imgData;
+    const idx = (x, y) => (y * width + x) * 4;
+
+    function isMagenta(x, y) {
+      if (x < 0 || y < 0 || x >= width || y >= height) return false;
+      const i = idx(x, y);
+      if (data[i + 3] < 20) return false; // 이미 거의 투명하면 대상 아님
+      return Math.min(data[i], data[i + 2]) - data[i + 1] > MAGENTA_GAP;
+    }
+
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    function firstClean(x, y, dx, dy) {
+      for (let d = 1; d <= SEARCH_DIST; d++) {
+        const nx = x + dx * d, ny = y + dy * d;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) return null;
+        if (!isMagenta(nx, ny) && data[idx(nx, ny) + 3] >= 60) {
+          const i = idx(nx, ny);
+          return { d, r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3] };
+        }
+      }
+      return null;
+    }
+
+    // 1. 오염된 픽셀 좌표를 전부 찾는다 (원본 배열 기준으로 판정, 아래서 한꺼번에 교체)
+    const targets = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (isMagenta(x, y)) targets.push({ x, y });
+      }
+    }
+
+    // 2. 각각을 주변 4방향 중 가장 가까운 "깨끗한" 픽셀 색의 거리 역가중 평균으로 채운다.
+    //    깨끗한 이웃을 하나도 못 찾으면(오염 덩어리가 너무 크면) 그냥 투명 처리한다.
+    targets.forEach(({ x, y }) => {
+      let rSum = 0, gSum = 0, bSum = 0, aSum = 0, wSum = 0;
+      DIRS.forEach(([dx, dy]) => {
+        const hit = firstClean(x, y, dx, dy);
+        if (!hit) return;
+        const w = 1 / hit.d;
+        rSum += hit.r * w; gSum += hit.g * w; bSum += hit.b * w; aSum += hit.a * w; wSum += w;
+      });
+      const i = idx(x, y);
+      if (wSum === 0) {
+        data[i + 3] = 0;
+        return;
+      }
+      data[i] = Math.round(rSum / wSum);
+      data[i + 1] = Math.round(gSum / wSum);
+      data[i + 2] = Math.round(bSum / wSum);
+      data[i + 3] = Math.round(aSum / wSum);
+    });
+
+    ctx.putImageData(imgData, 0, 0);
+
+    ipcRenderer.send('result', {
+      count: targets.length,
+      png: cv.toDataURL('image/png')
+    });
+  } catch (e) {
+    ipcRenderer.send('result', { error: String(e && e.stack || e) });
+  }
+})();
+</script>
+</body>
+</html>

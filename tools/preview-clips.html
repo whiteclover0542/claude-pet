@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+const CHAR_DIR = path.join(__dirname, '..', 'assets', 'characters');
+const def = JSON.parse(fs.readFileSync(path.join(CHAR_DIR, 'mong.json'), 'utf-8'));
+
+const SCALE = 2.2;
+const GAP = 14;
+const LABEL_H = 34;
+
+(async () => {
+  try {
+    const img = new Image();
+    img.src = `file:///${path.join(CHAR_DIR, def.image).replace(/\\/g, '/')}`;
+    await img.decode();
+
+    const names = Object.keys(def.clips);
+    const cellW = Math.max(...names.map((n) => def.clips[n].cellW)) * SCALE;
+    const cellH = Math.max(...names.map((n) => def.clips[n].cellH)) * SCALE;
+
+    const cols = 4;
+    const rows = Math.ceil(names.length / cols);
+    const W = cols * (cellW + GAP) + GAP;
+    const H = rows * (cellH + LABEL_H + GAP) + GAP;
+
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#1c1c22';
+    ctx.fillRect(0, 0, W, H);
+
+    names.forEach((name, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const ox = GAP + col * (cellW + GAP);
+      const oy = GAP + row * (cellH + LABEL_H + GAP);
+
+      const clip = def.clips[name];
+      // 대표 프레임: 두 번째 프레임(첫 프레임보다 표정이 있는 경우가 많음)
+      const f = clip.frames[Math.min(1, clip.frames.length - 1)];
+      const w = f.w * SCALE;
+      const h = f.h * SCALE;
+      const dx = ox + (cellW - w) / 2;
+      const dy = oy + (cellH - h);
+      ctx.drawImage(img, f.x, f.y, f.w, f.h, dx, dy, w, h);
+
+      ctx.fillStyle = '#8ab4ff';
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(name, ox + cellW / 2, oy + cellH + 20);
+      ctx.fillStyle = '#6b6b78';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(clip.label, ox + cellW / 2, oy + cellH + 32);
+    });
+
+    ipcRenderer.send('result', cv.toDataURL('image/png'));
+  } catch (e) {
+    ipcRenderer.send('result', 'ERR ' + (e && e.stack || e));
+  }
+})();
+</script>
+</body>
+</html>

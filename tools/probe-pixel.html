@@ -5,7 +5,7 @@
 const { ipcRenderer } = require('electron');
 const path = require('path');
 
-const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.webp');
+const SHEET = path.join(__dirname, '..', 'assets', 'characters', 'mong-sheet.png');
 const params = new URLSearchParams(location.search);
 const px = Number(params.get('x'));
 const py = Number(params.get('y'));

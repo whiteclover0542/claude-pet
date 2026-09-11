@@ -15,6 +15,10 @@ const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const HOOKS_DIR = path.join(DATA_DIR, 'hooks');
 const HOOK_SCRIPT_DEST = path.join(HOOKS_DIR, 'report-status.js');
 const HOOK_SCRIPT_SRC = path.join(__dirname, 'hooks', 'report-status.js');
+// SessionStart 훅이 "펫이 안 떠 있으면 띄워라"를 하려면 이 앱을 어떻게
+// 다시 실행하는지 알아야 한다. process.execPath는 개발 모드든 패키징된
+// 앱이든 실제 electron(또는 앱) 실행 파일을 정확히 가리키므로 그대로 적어둔다.
+const LAUNCH_INFO_PATH = path.join(DATA_DIR, 'launch-info.json');
 
 const DEFAULT_CONFIG = {
   character: 'mong',
@@ -46,6 +50,17 @@ function ensureDataDir() {
     fs.copyFileSync(HOOK_SCRIPT_SRC, HOOK_SCRIPT_DEST);
   } catch (e) {
     console.error('훅 스크립트 복사 실패:', e);
+  }
+  // SessionStart 훅이 이 앱을 다시 실행할 수 있도록, 실행 파일 경로를
+  // 매번 최신 상태로 적어 둔다. 개발 모드에선 electron.exe + 프로젝트
+  // 경로, 패키징된 앱에선 그 실행 파일 자체(인자 없이 실행)면 된다.
+  try {
+    fs.writeFileSync(LAUNCH_INFO_PATH, JSON.stringify({
+      execPath: process.execPath,
+      args: app.isPackaged ? [] : [__dirname]
+    }, null, 2));
+  } catch (e) {
+    console.error('launch-info 기록 실패:', e);
   }
 }
 

@@ -37,14 +37,23 @@ const SCALE_MAX = 2.0;
 const SCALE_STEP = 0.25;
 
 // --- 클립(애니메이션) 전환 타이밍 ------------------------------------------
-// 시트에 있는 11개 동작을 상태·경과 시간·마우스 위치에 따라 자연스럽게
+// 시트에 있는 11개 동작을 상태·이벤트·마우스 위치에 따라 자연스럽게
 // 갈아탄다. (clips: idle, walkRight/Left, wave, jump, sulky, poke,
 // working, ponder, lookRight/Left)
-const SLEEP_AFTER_MS = 60000; // 대기가 이만큼 길어지면 시무룩해진다
-const POKE_AFTER_MS = 15000; // 작업이 이만큼 길어지면 더 적극적으로 건드린다
+//
+// 우선순위 (위에 있을수록 우선, 끝나면 자동으로 아래 단계로 돌아간다)
+//   1. 드래그 중              → 드래그 방향으로 걷기 (walkRight/Left)
+//   2. 답변 도착               → jump
+//   3. 마우스가 펫 가까이(주변) 있음 → look (애니메이션이 아니라 각도별 정지
+//      프레임). 마우스가 펫 위에 정확히 올라오면 오히려 정면(기본 모션)
+//   4. notify/thinking/working/idle → wave/ponder/working/idle
+//      idle이 한동안 이어지면 poke를 한 번씩 짧게 끼워 넣는다
+//      세션이 아예 없으면(할 게 없으면) sulky
 const JUMP_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
-const WALK_DURATION_MS = 1100; // 세션을 전환할 때 걸어서 넘어가는 시간
-const CLIP_TICK_MS = 500; // 시간 기반 전환(시무룩해지기 등)을 재확인하는 주기
+const POKE_MIN_GAP_MS = 20000; // idle 상태에서 다음 poke까지 최소 대기
+const POKE_MAX_GAP_MS = 40000; // idle 상태에서 다음 poke까지 최대 대기
+const POKE_PLAY_MS = 1500; // poke를 보여주는 시간
+const CLIP_TICK_MS = 500; // 시간 기반 전환(jump 종료 등)을 재확인하는 주기
 
 let sprite = null;
 let hideTimer = null;
@@ -56,42 +65,48 @@ let currentConfig = null;
 
 // --- 클립 상태 머신 --------------------------------------------------------
 let lastSession = null; // 가장 최근에 받은 session 객체 (없으면 null)
-let lastClipState = null; // idle/thinking/working/notify 중 무엇으로 마지막에 갈아탔는지
-let idleSince = Date.now();
-let workingSince = null;
+let lastClipState = null; // idle/thinking/working/notify/none 중 무엇으로 마지막에 갈아탔는지
 let jumpUntil = 0; // 이 시각까지는 jump를 최우선으로 재생 (답변 도착)
-let walkUntil = 0; // 이 시각까지는 walkRight/Left를 최우선으로 재생 (세션 전환)
-let walkDirection = 'walkRight';
-let hovering = false; // 마우스가 펫 위에 있는 동안 마우스 커서를 바라본다
-let lookDirection = 'lookRight';
+let dragDirection = null; // 드래그 중일 때만 'walkRight'|'walkLeft'
+let hovering = false; // 마우스가 펫 위에 있는 동안 각도별 정지 프레임을 보여준다
+let pokeAt = 0; // 다음 poke를 재생할 예정 시각 (idle 상태에서만 의미 있음)
+
+function scheduleNextPoke(now) {
+  pokeAt = now + POKE_MIN_GAP_MS + Math.random() * (POKE_MAX_GAP_MS - POKE_MIN_GAP_MS);
+}
 
 /** session.state와 경과 시간을 보고 실제로 재생할 클립을 정한다 */
 function updateClip() {
   if (!sprite) return;
   const now = Date.now();
-  const state = lastSession ? lastSession.state : 'idle';
+  // 세션이 아예 없으면 idle이 아니라 'none'으로 구분해야 sulky로 갈 수 있다
+  const state = lastSession ? lastSession.state : 'none';
 
   if (state !== lastClipState) {
-    if (state === 'idle') idleSince = now;
-    if (state === 'working') workingSince = now;
     lastClipState = state;
+    if (state === 'idle') scheduleNextPoke(now);
   }
 
-  // 짧게 끼어드는 연출(세션 전환 · 반기기)이 가장 우선한다
-  if (now < walkUntil) return sprite.setClip(walkDirection);
+  // 1순위: 펫을 드래그해서 옮기는 중이면 그 방향으로 걷는다
+  if (dragDirection) return sprite.setClip(dragDirection);
+  // 2순위: 답변이 막 도착했으면 반긴다
   if (now < jumpUntil) return sprite.setClip('jump');
-  // 그다음으로, 마우스가 펫 위에 있으면 커서를 바라본다
-  if (hovering) return sprite.setClip(lookDirection);
+  // 3순위: 마우스가 펫 위에 있으면 (정지 프레임은 mousemove 핸들러가 직접
+  // sprite.setStaticFrame으로 그리므로, 여기서는 다른 클립으로 덮어쓰지 않는다)
+  if (hovering) return;
 
   if (state === 'notify') return sprite.setClip('wave');
   if (state === 'thinking') return sprite.setClip('ponder');
-  if (state === 'working') {
-    const elapsed = now - (workingSince || now);
-    return sprite.setClip(elapsed > POKE_AFTER_MS ? 'poke' : 'working');
+  if (state === 'working') return sprite.setClip('working');
+  if (state === 'idle') {
+    if (now >= pokeAt) {
+      if (now < pokeAt + POKE_PLAY_MS) return sprite.setClip('poke');
+      scheduleNextPoke(now); // poke가 끝났으면 다음 번을 다시 예약
+    }
+    return sprite.setClip('idle');
   }
-  // idle이거나 돌아가는 세션이 아예 없을 때
-  const elapsed = now - idleSince;
-  sprite.setClip(elapsed > SLEEP_AFTER_MS ? 'sulky' : 'idle');
+  // 세션이 아예 없어서 할 일이 없을 때
+  sprite.setClip('sulky');
 }
 
 // setInterval은 포커스 없는 이 창에서 스로틀링되어 거의 안 돌기 때문에,
@@ -205,8 +220,15 @@ function updateInteractive(el) {
 
 document.addEventListener('mousemove', (e) => {
   updateInteractive(document.elementFromPoint(e.clientX, e.clientY));
+  updateHover(e);
 });
-document.addEventListener('mouseleave', () => updateInteractive(null));
+document.addEventListener('mouseleave', () => {
+  updateInteractive(null);
+  if (hovering) {
+    hovering = false;
+    updateClip();
+  }
+});
 
 bubble.addEventListener('mouseenter', () => {
   pinned = true;
@@ -216,40 +238,72 @@ bubble.addEventListener('mouseleave', () => {
   pinned = false;
 });
 
-petEl.addEventListener('mouseenter', (e) => {
+petEl.addEventListener('mouseenter', () => {
   pinned = true;
   clearTimeout(hideTimer);
   if (hasSession) setBubbleVisible(true);
-  hovering = true;
-  updateLookDirection(e);
-  updateClip();
-});
-petEl.addEventListener('mousemove', (e) => {
-  updateLookDirection(e);
 });
 petEl.addEventListener('mouseleave', () => {
   pinned = false;
-  hovering = false;
-  updateClip();
 });
 
-/** 마우스가 펫 중심의 왼쪽/오른쪽 어디에 있는지 보고 바라볼 방향을 정한다 */
-function updateLookDirection(e) {
+// --- 마우스 각도를 따라가는 시선 -------------------------------------------
+// 마우스가 펫 "위"에 정확히 있으면 오히려 정면(기본 모션)을 보여주고,
+// 펫 가장자리에서 이만큼 떨어진 "주변"에 있을 때만 그쪽을 바라본다 —
+// 사람이 다가오면 쳐다보고, 만지고 있을 땐 그냥 얌전히 있는 느낌.
+const HOVER_MARGIN_PX = 26;
+
+// lookRight(row9)는 0°~157.5°, lookLeft(row10)는 180°~337.5°를 22.5° 간격
+// 8프레임씩 담고 있다 (합쳐서 16방향 전체 원). "동작을 재생"하는 게 아니라
+// 지금 마우스가 있는 각도의 정지 프레임 하나를 바로 보여준다.
+const LOOK_FRAMES = [
+  ...Array.from({ length: 8 }, (_, i) => ({ clip: 'lookRight', frame: i, angle: i * 22.5 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ clip: 'lookLeft', frame: i, angle: 180 + i * 22.5 }))
+];
+
+/** 점(x,y)에서 사각형 가장자리까지의 최단 거리. 사각형 안이면 0. */
+function distanceToRect(x, y, rect) {
+  const dx = Math.max(rect.left - x, 0, x - rect.right);
+  const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+  return Math.hypot(dx, dy);
+}
+
+function updateHover(e) {
   const rect = petEl.getBoundingClientRect();
-  const center = rect.left + rect.width / 2;
-  const next = e.clientX < center ? 'lookLeft' : 'lookRight';
-  if (next !== lookDirection) {
-    lookDirection = next;
+  const dist = distanceToRect(e.clientX, e.clientY, rect);
+  // dist === 0: 마우스가 펫 몸통 위 → 쳐다보지 않고 정면 유지
+  const near = dist > 0 && dist <= HOVER_MARGIN_PX;
+
+  if (near) {
+    hovering = true;
+    updateLookFrame(e, rect);
+  } else if (hovering) {
+    hovering = false;
     updateClip();
   }
 }
 
+function updateLookFrame(e, rect) {
+  if (!sprite) return;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI; // -180~180, 0°=오른쪽
+  if (angle < 0) angle += 360; // 0~360
+
+  let best = LOOK_FRAMES[0];
+  let bestDiff = 360;
+  for (const f of LOOK_FRAMES) {
+    const diff = Math.min(Math.abs(angle - f.angle), 360 - Math.abs(angle - f.angle));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = f;
+    }
+  }
+  sprite.setStaticFrame(best.clip, best.frame);
+}
+
 dotsEl.addEventListener('click', () => {
   window.claudePet.cycleSession();
-  // 다른 세션으로 넘어간다는 걸 잠깐 걸어가는 동작으로 보여준다
-  walkDirection = Math.random() < 0.5 ? 'walkRight' : 'walkLeft';
-  walkUntil = Date.now() + WALK_DURATION_MS;
-  updateClip();
 });
 
 // --- 톱니바퀴 → 설정 패널: 2단계로 연다 -----------------------------------
@@ -344,6 +398,11 @@ window.addEventListener('mousemove', (e) => {
     petEl.classList.add('dragging');
   }
   window.claudePet.dragWindowBy(dx, dy, drag.offset);
+  // 끌려가는 방향으로 걷는 모션을 보여준다 (좌우로 안 움직이면 직전 방향 유지)
+  if (dx !== 0) {
+    dragDirection = dx > 0 ? 'walkRight' : 'walkLeft';
+    updateClip();
+  }
   drag.startX = e.screenX;
   drag.startY = e.screenY;
 });
@@ -354,6 +413,8 @@ window.addEventListener('mouseup', () => {
   petEl.classList.remove('dragging');
   if (wasDrag) {
     window.claudePet.saveWindowPosition();
+    dragDirection = null;
+    updateClip();
   } else {
     // 이동 없이 눌렀다 뗐으면 클릭 — 톱니바퀴를 보이거나 숨긴다
     setGearVisible(gearEl.classList.contains('hidden'));

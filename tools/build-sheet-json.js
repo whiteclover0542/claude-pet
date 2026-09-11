@@ -24,15 +24,16 @@ const boxes = JSON.parse(fs.readFileSync(path.join(__dirname, 'sheet-boxes.json'
 // 의도(만든 사람이 알려준 것)와 다른 행이 있어서, 아래는 그걸로 확정한
 // 목록이다. 지금까지 받은 시트들은 모두 이 11행 구성을 그대로 따른다.
 const CLIPS = [
-  { name: 'idle', row: 0, fps: 5, label: '기본 상태' },
-  { name: 'walkRight', row: 1, fps: 10, label: '오른쪽으로 걷기' },
-  { name: 'walkLeft', row: 2, fps: 10, label: '왼쪽으로 걷기' },
-  { name: 'wave', row: 3, fps: 5, label: '인사하기' },
-  { name: 'jump', row: 4, fps: 8, label: '점프 후 착지' },
-  { name: 'sulky', row: 5, fps: 4, label: '시무룩한 상태' },
-  { name: 'poke', row: 6, fps: 6, label: '앞발로 건드리기' },
-  { name: 'working', row: 7, fps: 6, label: '작업하는 상태' },
-  { name: 'ponder', row: 8, fps: 5, label: '고민하는 상태' },
+  { name: 'idle', row: 0, fps: 4, label: '기본 상태' },
+  { name: 'walkRight', row: 1, fps: 7, label: '오른쪽으로 걷기' },
+  { name: 'walkLeft', row: 2, fps: 7, label: '왼쪽으로 걷기' },
+  { name: 'wave', row: 3, fps: 4, label: '인사하기' },
+  { name: 'jump', row: 4, fps: 6, label: '점프 후 착지' },
+  { name: 'sulky', row: 5, fps: 3, label: '시무룩한 상태' },
+  { name: 'poke', row: 6, fps: 4, label: '앞발로 건드리기' },
+  { name: 'working', row: 7, fps: 4, label: '작업하는 상태' },
+  { name: 'ponder', row: 8, fps: 4, label: '고민하는 상태' },
+  // lookRight/Left는 정지 프레임으로만 쓰여서(마우스 각도 추적) fps는 의미 없다
   { name: 'lookRight', row: 9, fps: 10, label: '마우스 커서 바라보기 (오른쪽)' },
   { name: 'lookLeft', row: 10, fps: 10, label: '마우스 커서 바라보기 (왼쪽)' }
 ];

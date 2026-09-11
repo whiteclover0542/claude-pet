@@ -17,10 +17,12 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawn } = require('child_process');
 
 const state = process.argv[2] || 'idle';
 const DATA_DIR = path.join(os.homedir(), '.claude-pet');
 const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+const LAUNCH_INFO_PATH = path.join(DATA_DIR, 'launch-info.json');
 
 const STDIN_TIMEOUT_MS = 800;
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024; // 끝부분만 읽어서 큰 파일도 빠르게
@@ -127,6 +129,32 @@ function scanTranscript(transcriptPath) {
   return out;
 }
 
+/**
+ * 펫 앱이 안 떠 있으면 새로 띄운다. 이미 떠 있으면 앱의
+ * requestSingleInstanceLock이 이 새 인스턴스를 조용히 즉시 종료시키므로,
+ * "떠 있는지 미리 확인"하지 않고 매번 그냥 실행을 시도해도 안전하다.
+ */
+function launchPetAppIfNeeded() {
+  try {
+    if (!fs.existsSync(LAUNCH_INFO_PATH)) return;
+    const info = JSON.parse(fs.readFileSync(LAUNCH_INFO_PATH, 'utf-8'));
+    if (!info.execPath) return;
+    // 이 환경 특유의 ELECTRON_RUN_AS_NODE가 남아 있으면 electron이 순수
+    // Node로 동작해 버려 창이 안 뜬다. 자식 프로세스에는 물려주지 않는다.
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(info.execPath, info.args || [], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env
+    });
+    child.unref();
+  } catch (e) {
+    // Claude Code 동작에 영향을 주면 안 되므로 조용히 무시
+  }
+}
+
 /** 오래된 세션 파일 정리 */
 function pruneSessions() {
   try {
@@ -152,6 +180,9 @@ function pruneSessions() {
 
   const sessionId = ctx.session_id || 'unknown';
   const safeId = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
+
+  // Claude Code가 막 시작됐다 — 펫이 안 떠 있으면 띄운다
+  if (ctx.hook_event_name === 'SessionStart') launchPetAppIfNeeded();
 
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
