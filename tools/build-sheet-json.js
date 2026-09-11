@@ -20,27 +20,28 @@ if (!charId || !displayName || !sheetFile) {
 
 const boxes = JSON.parse(fs.readFileSync(path.join(__dirname, 'sheet-boxes.json'), 'utf-8'));
 
-// 시트의 어느 행이 어떤 동작인지 (preview-rows.js로 눈으로 확인한 결과).
-// 지금까지 받은 시트들은 모두 이 11행 구성을 그대로 따른다.
+// 시트의 어느 행이 어떤 동작인지. 처음엔 자세만 보고 추측했다가 실제
+// 의도(만든 사람이 알려준 것)와 다른 행이 있어서, 아래는 그걸로 확정한
+// 목록이다. 지금까지 받은 시트들은 모두 이 11행 구성을 그대로 따른다.
 const CLIPS = [
-  { name: 'idle', row: 0, fps: 5, label: '앉아서 눈 깜빡' },
-  { name: 'walk', row: 1, fps: 10, label: '옆으로 총총 걷기' },
-  { name: 'run', row: 2, fps: 12, label: '달리기' },
-  { name: 'wave', row: 3, fps: 5, label: '앞발 흔들기' },
-  { name: 'beg', row: 4, fps: 6, label: '두 발 들고 조르기' },
-  { name: 'sleep', row: 5, fps: 4, label: '서 있다가 엎드려 잠들기' },
-  { name: 'happy', row: 6, fps: 8, label: '서서 신난 상태' },
-  { name: 'tilt', row: 7, fps: 5, label: '앉아서 고개 갸웃' },
-  { name: 'sit', row: 8, fps: 5, label: '앉아서 방긋' },
-  { name: 'turn', row: 9, fps: 10, label: '제자리에서 한 바퀴' },
-  { name: 'trot', row: 10, fps: 10, label: '작게 총총' }
+  { name: 'idle', row: 0, fps: 5, label: '기본 상태' },
+  { name: 'walkRight', row: 1, fps: 10, label: '오른쪽으로 걷기' },
+  { name: 'walkLeft', row: 2, fps: 10, label: '왼쪽으로 걷기' },
+  { name: 'wave', row: 3, fps: 5, label: '인사하기' },
+  { name: 'jump', row: 4, fps: 8, label: '점프 후 착지' },
+  { name: 'sulky', row: 5, fps: 4, label: '시무룩한 상태' },
+  { name: 'poke', row: 6, fps: 6, label: '앞발로 건드리기' },
+  { name: 'working', row: 7, fps: 6, label: '작업하는 상태' },
+  { name: 'ponder', row: 8, fps: 5, label: '고민하는 상태' },
+  { name: 'lookRight', row: 9, fps: 10, label: '마우스 커서 바라보기 (오른쪽)' },
+  { name: 'lookLeft', row: 10, fps: 10, label: '마우스 커서 바라보기 (왼쪽)' }
 ];
 
 // 펫 상태 → 클립
 const STATES = {
   idle: 'idle',
-  thinking: 'tilt',
-  working: 'walk',
+  thinking: 'ponder',
+  working: 'working',
   notify: 'wave'
 };
 

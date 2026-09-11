@@ -30,12 +30,13 @@ stdin으로 넘겨줍니다. 훅은 거기 담긴 `transcript_path`로 대화 �
 
 | 상태 | 언제 | 펫 |
 |------|------|-----|
-| 대기 | `Stop`, `SessionStart` | 앉아서 눈 깜빡 → 60초 넘게 이어지면 엎드려 잠듦 |
-| 생각 중 | `UserPromptSubmit` | 앉아서 고개 갸웃 |
-| 작업 중 | `PreToolUse`, `PostToolUse` | 옆으로 총총 걷기 → 15초 넘게 이어지면 달리기 |
-| 확인 필요 | `Notification` | 앞발 흔들기 또는 두 발 들고 조르기 (매번 하나로 고정) |
-| 답변 도착 | — | 3.5초간 반기는 동작 |
-| 세션 전환 | 말풍선 아래 점 클릭 | 한 바퀴 돌기 |
+| 대기 | `Stop`, `SessionStart` | 기본 자세 → 60초 넘게 이어지면 시무룩해짐 |
+| 생각 중 | `UserPromptSubmit` | 두 발 모으고 고민하는 자세 |
+| 작업 중 | `PreToolUse`, `PostToolUse` | 작업하는 자세 → 15초 넘게 이어지면 더 적극적으로 건드림 |
+| 확인 필요 | `Notification` | 인사하기(손 흔들기) |
+| 답변 도착 | — | 3.5초간 점프하며 반기기 |
+| 세션 전환 | 말풍선 아래 점 클릭 | 옆으로 걸어서 넘어가기 |
+| 마우스를 올리면 | — | 커서가 있는 쪽을 바라봄 |
 
 ## 설치
 
@@ -92,12 +93,18 @@ env -u ELECTRON_RUN_AS_NODE npx electron tools/analyze-sheet.js
 # 4. 어떤 행이 어떤 동작인지 눈으로 확인한다
 env -u ELECTRON_RUN_AS_NODE npx electron tools/preview-rows.js
 
+# 4-1. 헷갈리는 행이 있으면 하나만 크게 확대해서 본다 (선택)
+env -u ELECTRON_RUN_AS_NODE npx electron tools/zoom-row.js 4
+
 # 5. 캐릭터ID·표시이름·시트파일명을 넣어 JSON을 만든다
 node tools/build-sheet-json.js mydog 마이독 mydog-sheet.webp
 ```
 
 행 구성이 지금까지 받은 시트들과 다르면 `tools/build-sheet-json.js`의
-`CLIPS`/`STATES` 상수도 손봐야 합니다.
+`CLIPS`/`STATES` 상수도 손봐야 합니다. **자세만 보고 이름을 추측하지
+말고, 실제로 만든 사람에게 각 행의 의도를 확인하는 게 안전합니다** — 처음
+몽이 시트를 넣을 때 자세만 보고 붙인 이름이 실제 의도와 달랐던 적이 있어서,
+지금 이름들은 전부 만든 사람에게 직접 확인받은 것입니다.
 
 행마다 프레임 수와 크기가 달라도 됩니다. 프레임은 **아래-가운데** 기준으로
 정렬되므로 앉은 자세와 선 자세의 키 차이가 자연스럽게 유지됩니다.

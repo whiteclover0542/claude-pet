@@ -40,13 +40,14 @@ const SCALE_MAX = 2.0;
 const SCALE_STEP = 0.25;
 
 // --- 클립(애니메이션) 전환 타이밍 ------------------------------------------
-// 시트에 있는 11개 동작 중 idle/tilt/walk/wave 4개만 쓰던 걸, 나머지도
-// 자연스러운 자리를 찾아 붙인다.
-const SLEEP_AFTER_MS = 60000; // 대기가 이만큼 길어지면 엎드려 잠든다
-const RUN_AFTER_MS = 15000; // 작업이 이만큼 길어지면 총총걸음 대신 달린다
-const HAPPY_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
-const TURN_DURATION_MS = 1100; // 세션을 전환할 때 한 바퀴 도는 시간
-const CLIP_TICK_MS = 500; // 시간 기반 전환(잠들기·달리기)을 재확인하는 주기
+// 시트에 있는 11개 동작을 상태·경과 시간·마우스 위치에 따라 자연스럽게
+// 갈아탄다. (clips: idle, walkRight/Left, wave, jump, sulky, poke,
+// working, ponder, lookRight/Left)
+const SLEEP_AFTER_MS = 60000; // 대기가 이만큼 길어지면 시무룩해진다
+const POKE_AFTER_MS = 15000; // 작업이 이만큼 길어지면 더 적극적으로 건드린다
+const JUMP_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
+const WALK_DURATION_MS = 1100; // 세션을 전환할 때 걸어서 넘어가는 시간
+const CLIP_TICK_MS = 500; // 시간 기반 전환(시무룩해지기 등)을 재확인하는 주기
 
 let sprite = null;
 let hideTimer = null;
@@ -62,9 +63,11 @@ let lastSession = null; // 가장 최근에 받은 session 객체 (없으면 nul
 let lastClipState = null; // idle/thinking/working/notify 중 무엇으로 마지막에 갈아탔는지
 let idleSince = Date.now();
 let workingSince = null;
-let notifyClip = 'wave'; // notify 진입 시 한 번만 골라서 고정 (wave 또는 beg)
-let happyUntil = 0; // 이 시각까지는 happy를 최우선으로 재생
-let turnUntil = 0; // 이 시각까지는 turn을 최우선으로 재생
+let jumpUntil = 0; // 이 시각까지는 jump를 최우선으로 재생 (답변 도착)
+let walkUntil = 0; // 이 시각까지는 walkRight/Left를 최우선으로 재생 (세션 전환)
+let walkDirection = 'walkRight';
+let hovering = false; // 마우스가 펫 위에 있는 동안 마우스 커서를 바라본다
+let lookDirection = 'lookRight';
 
 /** session.state와 경과 시간을 보고 실제로 재생할 클립을 정한다 */
 function updateClip() {
@@ -75,23 +78,24 @@ function updateClip() {
   if (state !== lastClipState) {
     if (state === 'idle') idleSince = now;
     if (state === 'working') workingSince = now;
-    if (state === 'notify') notifyClip = Math.random() < 0.5 ? 'wave' : 'beg';
     lastClipState = state;
   }
 
-  // 짧게 끼어드는 연출(한 바퀴 · 반기기)이 우선한다
-  if (now < turnUntil) return sprite.setClip('turn');
-  if (now < happyUntil) return sprite.setClip('happy');
+  // 짧게 끼어드는 연출(세션 전환 · 반기기)이 가장 우선한다
+  if (now < walkUntil) return sprite.setClip(walkDirection);
+  if (now < jumpUntil) return sprite.setClip('jump');
+  // 그다음으로, 마우스가 펫 위에 있으면 커서를 바라본다
+  if (hovering) return sprite.setClip(lookDirection);
 
-  if (state === 'notify') return sprite.setClip(notifyClip);
-  if (state === 'thinking') return sprite.setClip('tilt');
+  if (state === 'notify') return sprite.setClip('wave');
+  if (state === 'thinking') return sprite.setClip('ponder');
   if (state === 'working') {
     const elapsed = now - (workingSince || now);
-    return sprite.setClip(elapsed > RUN_AFTER_MS ? 'run' : 'walk');
+    return sprite.setClip(elapsed > POKE_AFTER_MS ? 'poke' : 'working');
   }
   // idle이거나 돌아가는 세션이 아예 없을 때
   const elapsed = now - idleSince;
-  sprite.setClip(elapsed > SLEEP_AFTER_MS ? 'sleep' : 'idle');
+  sprite.setClip(elapsed > SLEEP_AFTER_MS ? 'sulky' : 'idle');
 }
 
 // setInterval은 포커스 없는 이 창에서 스로틀링되어 거의 안 돌기 때문에,
@@ -171,7 +175,7 @@ function applySession(payload) {
   if (session.reply && session.replyAt && session.replyAt !== lastReplyAt) {
     lastReplyAt = session.replyAt;
     showReply(session.reply);
-    happyUntil = Date.now() + HAPPY_DURATION_MS;
+    jumpUntil = Date.now() + JUMP_DURATION_MS;
   }
 
   updateClip();
@@ -226,19 +230,39 @@ bubble.addEventListener('mouseleave', () => {
   pinned = false;
 });
 
-petEl.addEventListener('mouseenter', () => {
+petEl.addEventListener('mouseenter', (e) => {
   pinned = true;
   clearTimeout(hideTimer);
   if (hasSession) setBubbleVisible(true);
+  hovering = true;
+  updateLookDirection(e);
+  updateClip();
+});
+petEl.addEventListener('mousemove', (e) => {
+  updateLookDirection(e);
 });
 petEl.addEventListener('mouseleave', () => {
   pinned = false;
+  hovering = false;
+  updateClip();
 });
+
+/** 마우스가 펫 중심의 왼쪽/오른쪽 어디에 있는지 보고 바라볼 방향을 정한다 */
+function updateLookDirection(e) {
+  const rect = petEl.getBoundingClientRect();
+  const center = rect.left + rect.width / 2;
+  const next = e.clientX < center ? 'lookLeft' : 'lookRight';
+  if (next !== lookDirection) {
+    lookDirection = next;
+    updateClip();
+  }
+}
 
 dotsEl.addEventListener('click', () => {
   window.claudePet.cycleSession();
-  // 다른 세션으로 넘어간다는 걸 한 바퀴 도는 동작으로 잠깐 보여준다
-  turnUntil = Date.now() + TURN_DURATION_MS;
+  // 다른 세션으로 넘어간다는 걸 잠깐 걸어가는 동작으로 보여준다
+  walkDirection = Math.random() < 0.5 ? 'walkRight' : 'walkLeft';
+  walkUntil = Date.now() + WALK_DURATION_MS;
   updateClip();
 });
 

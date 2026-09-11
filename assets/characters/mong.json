@@ -6,13 +6,13 @@
   "anchor": "bottom-center",
   "states": {
     "idle": "idle",
-    "thinking": "tilt",
-    "working": "walk",
+    "thinking": "ponder",
+    "working": "working",
     "notify": "wave"
   },
   "clips": {
     "idle": {
-      "label": "앉아서 눈 깜빡",
+      "label": "기본 상태",
       "fps": 5,
       "cellW": 176,
       "cellH": 198,
@@ -61,8 +61,8 @@
         }
       ]
     },
-    "walk": {
-      "label": "옆으로 총총 걷기",
+    "walkRight": {
+      "label": "오른쪽으로 걷기",
       "fps": 10,
       "cellW": 182,
       "cellH": 173,
@@ -117,9 +117,9 @@
         }
       ]
     },
-    "run": {
-      "label": "달리기",
-      "fps": 12,
+    "walkLeft": {
+      "label": "왼쪽으로 걷기",
+      "fps": 10,
       "cellW": 182,
       "cellH": 173,
       "frames": [
@@ -174,7 +174,7 @@
       ]
     },
     "wave": {
-      "label": "앞발 흔들기",
+      "label": "인사하기",
       "fps": 5,
       "cellW": 170,
       "cellH": 198,
@@ -205,9 +205,9 @@
         }
       ]
     },
-    "beg": {
-      "label": "두 발 들고 조르기",
-      "fps": 6,
+    "jump": {
+      "label": "점프 후 착지",
+      "fps": 8,
       "cellW": 182,
       "cellH": 198,
       "frames": [
@@ -243,8 +243,8 @@
         }
       ]
     },
-    "sleep": {
-      "label": "서 있다가 엎드려 잠들기",
+    "sulky": {
+      "label": "시무룩한 상태",
       "fps": 4,
       "cellW": 182,
       "cellH": 198,
@@ -299,9 +299,9 @@
         }
       ]
     },
-    "happy": {
-      "label": "서서 신난 상태",
-      "fps": 8,
+    "poke": {
+      "label": "앞발로 건드리기",
+      "fps": 6,
       "cellW": 163,
       "cellH": 198,
       "frames": [
@@ -343,9 +343,9 @@
         }
       ]
     },
-    "tilt": {
-      "label": "앉아서 고개 갸웃",
-      "fps": 5,
+    "working": {
+      "label": "작업하는 상태",
+      "fps": 6,
       "cellW": 154,
       "cellH": 198,
       "frames": [
@@ -387,8 +387,8 @@
         }
       ]
     },
-    "sit": {
-      "label": "앉아서 방긋",
+    "ponder": {
+      "label": "고민하는 상태",
       "fps": 5,
       "cellW": 173,
       "cellH": 198,
@@ -431,8 +431,8 @@
         }
       ]
     },
-    "turn": {
-      "label": "제자리에서 한 바퀴",
+    "lookRight": {
+      "label": "마우스 커서 바라보기 (오른쪽)",
       "fps": 10,
       "cellW": 155,
       "cellH": 177,
@@ -487,8 +487,8 @@
         }
       ]
     },
-    "trot": {
-      "label": "작게 총총",
+    "lookLeft": {
+      "label": "마우스 커서 바라보기 (왼쪽)",
       "fps": 10,
       "cellW": 145,
       "cellH": 158,
