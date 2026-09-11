@@ -412,6 +412,7 @@ ipcMain.handle('cycle-session', () => {
   return activeSessionPayload();
 });
 ipcMain.handle('setup-hooks', () => ({ ok: true, path: setupClaudeCodeHooks() }));
+ipcMain.on('quit-app', () => app.exit(0));
 
 ipcMain.on('set-interactive', (_e, on) => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -450,10 +451,19 @@ if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 } else {
   app.whenReady().then(() => {
-    ensureDataDir();
-    createWindow();
-    createTray();
-    watchSessions();
+    try {
+      ensureDataDir();
+      createWindow();
+      createTray();
+      watchSessions();
+    } catch (e) {
+      fs.writeFileSync(path.join(os.tmpdir(), 'claude-pet-startup-error.txt'), String(e && e.stack || e));
+    }
+  });
+  process.on('uncaughtException', (e) => {
+    try {
+      fs.appendFileSync(path.join(os.tmpdir(), 'claude-pet-startup-error.txt'), '\n[uncaught] ' + String(e && e.stack || e));
+    } catch (_) { /* noop */ }
   });
 }
 

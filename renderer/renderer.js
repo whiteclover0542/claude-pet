@@ -6,11 +6,14 @@ const sourceEl = document.getElementById('bubble-source');
 const stateEl = document.getElementById('bubble-state');
 const bodyEl = document.getElementById('bubble-body');
 const dotsEl = document.getElementById('session-dots');
+const gearEl = document.getElementById('gear-btn');
 const panelEl = document.getElementById('settings-panel');
 const scaleValueEl = document.getElementById('scale-value');
 const scaleDownBtn = document.getElementById('scale-down');
 const scaleUpBtn = document.getElementById('scale-up');
 const characterListEl = document.getElementById('character-list');
+const setupHooksBtn = document.getElementById('setup-hooks-btn');
+const quitBtn = document.getElementById('quit-btn');
 
 const STATE_LABEL = {
   idle: '대기 중',
@@ -139,13 +142,14 @@ function applySession(payload) {
 
 // --- 마우스가 실제 요소 위에 있을 때만 창이 클릭을 받도록 ------------------
 // 투명한 부분은 통과시켜야 뒤쪽 창을 정상적으로 클릭할 수 있다.
-// 단, 설정 패널이 열려 있는 동안은 "바깥을 클릭하면 닫기"가 되도록
-// 창 전체를 interactive하게 유지한다.
+// 단, 톱니바퀴나 설정 패널이 열려 있는 동안은 "바깥을 클릭하면 닫기"가
+// 되도록 창 전체를 interactive하게 유지한다.
 let interactive = null;
+let gearOpen = false;
 let panelOpen = false;
 
 function updateInteractive(el) {
-  const want = panelOpen || !!(el && el.closest('[data-hit]'));
+  const want = gearOpen || panelOpen || !!(el && el.closest('[data-hit]'));
   if (want === interactive) return;
   interactive = want;
   window.claudePet.setInteractive(want);
@@ -175,7 +179,16 @@ petEl.addEventListener('mouseleave', () => {
 
 dotsEl.addEventListener('click', () => window.claudePet.cycleSession());
 
-// --- 설정 패널: 펫을 클릭하면 열고 닫는다 ----------------------------------
+// --- 톱니바퀴 → 설정 패널: 2단계로 연다 -----------------------------------
+// 펫을 클릭하면 톱니바퀴만 나타나고, 그걸 눌러야 실제 설정 패널이 열린다.
+// 실수로 펫을 눌렀을 때 바로 패널이 펼쳐지지 않도록 하기 위함.
+function setGearVisible(visible) {
+  gearOpen = visible;
+  gearEl.classList.toggle('hidden', !visible);
+  if (!visible) setPanelVisible(false);
+  else updateInteractive(petEl);
+}
+
 function setPanelVisible(visible) {
   panelOpen = visible;
   panelEl.classList.toggle('hidden', !visible);
@@ -184,10 +197,16 @@ function setPanelVisible(visible) {
   if (visible) updateInteractive(petEl);
 }
 
+gearEl.addEventListener('mousedown', (e) => e.stopPropagation());
+gearEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setPanelVisible(panelEl.classList.contains('hidden'));
+});
+
 document.addEventListener('mousedown', (e) => {
-  if (panelEl.classList.contains('hidden')) return;
-  if (e.target.closest('#settings-panel') || e.target.closest('#pet')) return;
-  setPanelVisible(false);
+  if (!gearOpen && !panelOpen) return;
+  if (e.target.closest('#pet')) return; // 펫(톱니바퀴 포함)은 각자 처리
+  setGearVisible(false);
 });
 
 function renderScale(scale) {
@@ -216,6 +235,11 @@ scaleUpBtn.addEventListener('click', () => {
   const next = Math.min(SCALE_MAX, +(currentConfig.scale + SCALE_STEP).toFixed(2));
   window.claudePet.setConfig({ scale: next });
 });
+
+// 트레이 아이콘이 안 보이는 환경(원격 데스크톱 등)도 있어서, 트레이에만
+// 있던 핵심 기능(연동 설정·종료)을 설정 패널에도 넣어 둔다.
+setupHooksBtn.addEventListener('click', () => window.claudePet.setupHooks());
+quitBtn.addEventListener('click', () => window.claudePet.quitApp());
 
 // --- 펫을 끌어서 위치 옮기기 (일정 거리 이상 움직여야 드래그로 본다) -------
 // 창 자체는 말풍선·설정 패널까지 담을 수 있게 넉넉하게 잡혀 있어서, 창
@@ -258,8 +282,8 @@ window.addEventListener('mouseup', () => {
   if (wasDrag) {
     window.claudePet.saveWindowPosition();
   } else {
-    // 이동 없이 눌렀다 뗐으면 클릭 — 설정 패널 토글
-    setPanelVisible(panelEl.classList.contains('hidden'));
+    // 이동 없이 눌렀다 뗐으면 클릭 — 톱니바퀴를 보이거나 숨긴다
+    setGearVisible(gearEl.classList.contains('hidden'));
   }
 });
 

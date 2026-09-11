@@ -21,9 +21,15 @@
 
     <div id="pet" data-hit>
       <canvas id="pet-canvas"></canvas>
+      <!-- 펫을 클릭하면 이 톱니바퀴가 나타난다. 눌러야 설정 패널이 열린다. -->
+      <button id="gear-btn" class="hidden" type="button" aria-label="설정" data-hit>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6a.5.5 0 0 0 .1-.6l-2-3.4a.5.5 0 0 0-.6-.2l-2.4 1a7.4 7.4 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2l-2 3.4a.5.5 0 0 0 .1.6l2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l2 3.4a.5.5 0 0 0 .6.2l2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h4a.5.5 0 0 0 .5-.4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l2-3.4a.5.5 0 0 0-.1-.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
+        </svg>
+      </button>
     </div>
 
-    <!-- 펫을 클릭하면 열리는 설정 패널 (크기 조절 + 캐릭터 선택) -->
+    <!-- 톱니바퀴를 누르면 열리는 설정 패널 (크기 조절 + 캐릭터 선택) -->
     <div id="settings-panel" class="hidden" data-hit>
       <div class="settings-row">
         <span class="settings-label">크기</span>
@@ -34,6 +40,10 @@
       <div class="settings-row">
         <span class="settings-label">캐릭터</span>
         <div id="character-list"></div>
+      </div>
+      <div class="settings-row settings-actions">
+        <button id="setup-hooks-btn" type="button" class="settings-action">Claude Code 연동</button>
+        <button id="quit-btn" type="button" class="settings-action settings-action-danger">종료</button>
       </div>
     </div>
   </div>

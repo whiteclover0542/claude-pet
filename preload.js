@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('claudePet', {
   getActiveSession: () => ipcRenderer.invoke('get-active-session'),
   cycleSession: () => ipcRenderer.invoke('cycle-session'),
   setupHooks: () => ipcRenderer.invoke('setup-hooks'),
+  quitApp: () => ipcRenderer.send('quit-app'),
 
   // 투명한 영역은 클릭이 뒤쪽 창으로 통과하도록 토글한다
   setInteractive: (on) => ipcRenderer.send('set-interactive', on),
