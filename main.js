@@ -203,7 +203,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // 포커스 없는 창(focusable: false)이라 기본 스로틀링이 걸리면
+      // 애니메이션 프레임이나 잠들기·달리기 전환 타이머가 늦게 돈다
+      backgroundThrottling: false
     }
   });
 

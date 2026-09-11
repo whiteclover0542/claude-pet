@@ -39,15 +39,72 @@ const SCALE_MIN = 0.5;
 const SCALE_MAX = 2.0;
 const SCALE_STEP = 0.25;
 
+// --- 클립(애니메이션) 전환 타이밍 ------------------------------------------
+// 시트에 있는 11개 동작 중 idle/tilt/walk/wave 4개만 쓰던 걸, 나머지도
+// 자연스러운 자리를 찾아 붙인다.
+const SLEEP_AFTER_MS = 60000; // 대기가 이만큼 길어지면 엎드려 잠든다
+const RUN_AFTER_MS = 15000; // 작업이 이만큼 길어지면 총총걸음 대신 달린다
+const HAPPY_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
+const TURN_DURATION_MS = 1100; // 세션을 전환할 때 한 바퀴 도는 시간
+const CLIP_TICK_MS = 500; // 시간 기반 전환(잠들기·달리기)을 재확인하는 주기
+
 let sprite = null;
 let hideTimer = null;
 let replyTimer = null;
 let lastReplyAt = null;
 let pinned = false; // 마우스를 올리고 있으면 말풍선을 접지 않는다
 let hasSession = false; // 돌아가는 세션이 있어야만 마우스오버로 말풍선을 연다
-let currentState = 'idle';
 let loadedCharacter = null;
 let currentConfig = null;
+
+// --- 클립 상태 머신 --------------------------------------------------------
+let lastSession = null; // 가장 최근에 받은 session 객체 (없으면 null)
+let lastClipState = null; // idle/thinking/working/notify 중 무엇으로 마지막에 갈아탔는지
+let idleSince = Date.now();
+let workingSince = null;
+let notifyClip = 'wave'; // notify 진입 시 한 번만 골라서 고정 (wave 또는 beg)
+let happyUntil = 0; // 이 시각까지는 happy를 최우선으로 재생
+let turnUntil = 0; // 이 시각까지는 turn을 최우선으로 재생
+
+/** session.state와 경과 시간을 보고 실제로 재생할 클립을 정한다 */
+function updateClip() {
+  if (!sprite) return;
+  const now = Date.now();
+  const state = lastSession ? lastSession.state : 'idle';
+
+  if (state !== lastClipState) {
+    if (state === 'idle') idleSince = now;
+    if (state === 'working') workingSince = now;
+    if (state === 'notify') notifyClip = Math.random() < 0.5 ? 'wave' : 'beg';
+    lastClipState = state;
+  }
+
+  // 짧게 끼어드는 연출(한 바퀴 · 반기기)이 우선한다
+  if (now < turnUntil) return sprite.setClip('turn');
+  if (now < happyUntil) return sprite.setClip('happy');
+
+  if (state === 'notify') return sprite.setClip(notifyClip);
+  if (state === 'thinking') return sprite.setClip('tilt');
+  if (state === 'working') {
+    const elapsed = now - (workingSince || now);
+    return sprite.setClip(elapsed > RUN_AFTER_MS ? 'run' : 'walk');
+  }
+  // idle이거나 돌아가는 세션이 아예 없을 때
+  const elapsed = now - idleSince;
+  sprite.setClip(elapsed > SLEEP_AFTER_MS ? 'sleep' : 'idle');
+}
+
+// setInterval은 포커스 없는 이 창에서 스로틀링되어 거의 안 돌기 때문에,
+// 이미 정상 동작이 확인된 requestAnimationFrame 루프 안에서 주기를 잰다.
+let lastClipTick = 0;
+function clipTickLoop(now) {
+  if (now - lastClipTick >= CLIP_TICK_MS) {
+    lastClipTick = now;
+    updateClip();
+  }
+  requestAnimationFrame(clipTickLoop);
+}
+requestAnimationFrame(clipTickLoop);
 
 function setBubbleVisible(visible) {
   bubble.classList.toggle('hidden', !visible);
@@ -91,32 +148,33 @@ function stateLine(session) {
 
 function applySession(payload) {
   const session = payload.session;
+  lastSession = session;
 
   if (!session) {
     // 돌아가는 세션이 없으면 조용히 대기 (마우스를 올려도 말풍선을 열지 않는다)
     hasSession = false;
-    currentState = 'idle';
-    sprite && sprite.setState('idle');
     petEl.classList.remove('notify');
     setBubbleVisible(false);
     dotsEl.classList.add('hidden');
+    updateClip();
     return;
   }
 
   hasSession = true;
-  currentState = session.state;
-  sprite && sprite.setState(session.state);
   petEl.classList.toggle('notify', session.state === 'notify');
 
   titleEl.textContent = bubbleTitle(session);
   sourceEl.textContent = SOURCE_LABEL[session.entrypoint] || '';
   stateEl.textContent = stateLine(session);
 
-  // 새 답변이 도착했을 때만 본문을 펼친다
+  // 새 답변이 도착했을 때만 본문을 펼치고, 펫도 잠깐 반긴다
   if (session.reply && session.replyAt && session.replyAt !== lastReplyAt) {
     lastReplyAt = session.replyAt;
     showReply(session.reply);
+    happyUntil = Date.now() + HAPPY_DURATION_MS;
   }
+
+  updateClip();
 
   // 여러 세션이 돌면 점으로 표시 (클릭하면 전환)
   if (payload.count > 1) {
@@ -177,7 +235,12 @@ petEl.addEventListener('mouseleave', () => {
   pinned = false;
 });
 
-dotsEl.addEventListener('click', () => window.claudePet.cycleSession());
+dotsEl.addEventListener('click', () => {
+  window.claudePet.cycleSession();
+  // 다른 세션으로 넘어간다는 걸 한 바퀴 도는 동작으로 잠깐 보여준다
+  turnUntil = Date.now() + TURN_DURATION_MS;
+  updateClip();
+});
 
 // --- 톱니바퀴 → 설정 패널: 2단계로 연다 -----------------------------------
 // 펫을 클릭하면 톱니바퀴만 나타나고, 그걸 눌러야 실제 설정 패널이 열린다.
@@ -296,7 +359,7 @@ async function loadCharacter(name, height) {
     sprite = next;
     loadedCharacter = name;
     sprite.setDisplayHeight(height);
-    sprite.setState(currentState);
+    updateClip();
     sprite.start();
   } catch (e) {
     titleEl.textContent = '캐릭터를 불러오지 못했습니다';
