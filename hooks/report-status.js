@@ -3,6 +3,8 @@
  * Claude Code 훅 핸들러.
  * 사용법: node report-status.js <state>
  *   state: idle | thinking | working | notify | end
+ *   (notify 중 알림 문구가 "사용량 한도 도달"로 읽히면 내부적으로 limit로
+ *    바꿔 기록한다 — 시무룩 표정은 이때만 써야 하기 때문)
  *
  * Claude Code는 이벤트마다 이 스크립트를 실행하면서 JSON 컨텍스트를 stdin으로
  * 넘겨준다. 거기서 session_id / transcript_path / cwd 를 받아, 트랜스크립트
@@ -19,7 +21,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 
-const state = process.argv[2] || 'idle';
+const rawState = process.argv[2] || 'idle';
 const DATA_DIR = path.join(os.homedir(), '.claude-pet');
 const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const LAUNCH_INFO_PATH = path.join(DATA_DIR, 'launch-info.json');
@@ -77,6 +79,64 @@ function squash(text) {
   return t.length > MAX_TEXT ? `${t.slice(0, MAX_TEXT)}…` : t;
 }
 
+/** 단어 중간이 아니라 공백 경계에서 자연스럽게 자른다 */
+function truncateAtWordBoundary(text, max) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const slice = t.slice(0, max);
+  const cut = slice.lastIndexOf(' ');
+  return `${(cut > max * 0.4 ? slice.slice(0, cut) : slice).trim()}…`;
+}
+
+/**
+ * 답변 텍스트에서 마크다운 기호를 걷어내 "말"만 남긴다. 코드 블록·표·
+ * 목록 기호가 그대로 남아 있으면 마지막 문장을 골라도 지저분하다.
+ */
+function stripMarkdown(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ') // 코드 블록은 통째로 제거
+    .replace(/`([^`]+)`/g, '$1') // 인라인 코드는 백틱만 벗긴다
+    .replace(/^#{1,6}\s+/gm, '') // 헤더 기호
+    .replace(/^\s*[-*+]\s+/gm, '') // 불릿 목록 기호
+    .replace(/^\s*\d+[.)]\s+/gm, '') // 번호 목록 기호
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 링크는 텍스트만
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // 볼드
+    .replace(/\*([^*]+)\*/g, '$1') // 이탤릭
+    .replace(/^>\s+/gm, ''); // 인용 기호
+}
+
+/**
+ * 말풍선 둘째 줄에 "✅ 방금 답변" 식으로 보여줄 짧은 문장. 답변 전체를
+ * 앞에서부터 자르면 도입부만 남으므로, 보통 마무리 인사나 결론이 담긴
+ * 마지막 줄 · 마지막 문장을 골라 자연스럽게 보여준다.
+ *
+ * 마크다운 기호를 먼저 걷어내고, 목록 항목처럼 줄바꿈으로 나뉘어 있어
+ * 문장부호가 없는 경우까지 한 문장으로 뭉쳐지지 않도록 줄 단위로 먼저
+ * 자른 뒤 그 안에서 마지막 문장을 고른다.
+ */
+function sentenceGist(text, max) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  const lines = stripMarkdown(text)
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (!lines.length) return null;
+
+  const lastLine = lines[lines.length - 1];
+  const sentences = lastLine.split(/(?<=[.!?。！？])\s+/).map((s) => s.trim()).filter(Boolean);
+
+  let picked = null;
+  for (let i = sentences.length - 1; i >= 0; i--) {
+    if (sentences[i].length >= 4) {
+      picked = sentences[i];
+      break;
+    }
+  }
+  picked = picked || lastLine;
+  return truncateAtWordBoundary(picked, max);
+}
+
 /** assistant/user 메시지의 content 배열에서 텍스트 블록만 이어붙인다 */
 function textOf(message) {
   if (!message) return '';
@@ -97,7 +157,7 @@ function textOf(message) {
  * - entrypoint: claude-vscode 등 어디서 돌고 있는지
  */
 function scanTranscript(transcriptPath) {
-  const out = { title: null, prompt: null, reply: null, entrypoint: null, gitBranch: null };
+  const out = { title: null, prompt: null, reply: null, replyRaw: null, entrypoint: null, gitBranch: null };
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return out;
 
   const lines = readTailLines(transcriptPath, TRANSCRIPT_TAIL_BYTES);
@@ -121,7 +181,10 @@ function scanTranscript(transcriptPath) {
     }
     if (!out.reply && o.type === 'assistant' && !o.isSidechain && o.message) {
       const t = textOf(o.message);
-      if (t) out.reply = squash(t);
+      if (t) {
+        out.reply = squash(t);
+        out.replyRaw = t; // 줄바꿈이 살아 있어야 sentenceGist()가 마지막 줄을 고를 수 있다
+      }
     }
 
     if (out.title && out.prompt && out.reply && out.entrypoint) break;
@@ -188,11 +251,19 @@ function pruneSessions() {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
     // 세션이 끝나면 파일을 지워서 펫이 죽은 세션을 붙들고 있지 않게 한다
-    if (state === 'end') {
+    if (rawState === 'end') {
       try { fs.unlinkSync(path.join(SESSIONS_DIR, `${safeId}.json`)); } catch (e) { /* noop */ }
       pruneSessions();
       process.exit(0);
     }
+
+    // Notification 훅은 권한 확인 같은 일반 알림과 "사용량 한도 도달"을
+    // 구분 없이 똑같이 보낸다. 시무룩(sulky) 표정은 한도 도달 때만 써야
+    // 하므로, 알림 메시지 문구로 그 경우만 따로 골라낸다.
+    const isUsageLimit = /usage limit|rate limit|limit reached|resets? at|사용량\s*한도|한도\s*도달|토큰.{0,4}(소진|부족|한도)/i.test(
+      ctx.message || ''
+    );
+    const state = rawState === 'notify' && isUsageLimit ? 'limit' : rawState;
 
     const scanned = scanTranscript(ctx.transcript_path);
     const prev = (() => {
@@ -203,17 +274,27 @@ function pruneSessions() {
       }
     })();
 
+    // 답변은 턴이 끝났을 때(idle)만 갱신 — 도중엔 이전 답변을 그대로 둔다
+    const reply = state === 'idle' ? scanned.reply || null : prev.reply || null;
+    // replyRaw(줄바꿈 보존)가 있어야 sentenceGist가 마지막 줄을 정확히 고른다
+    const replyGist = state === 'idle'
+      ? (scanned.reply ? sentenceGist(scanned.replyRaw || scanned.reply, 40) : null)
+      : prev.replyGist || null;
+
     const record = {
       sessionId,
       state,
       // UserPromptSubmit 훅은 prompt를 직접 준다 (트랜스크립트보다 빠름)
       prompt: squash(ctx.prompt) || scanned.prompt || prev.prompt || null,
       title: scanned.title || prev.title || null,
-      // 답변은 턴이 끝났을 때(idle)만 갱신 — 도중엔 이전 답변을 그대로 둔다
-      reply: state === 'idle' ? scanned.reply || null : prev.reply || null,
+      reply,
       replyAt: state === 'idle' && scanned.reply && scanned.reply !== prev.reply
         ? Date.now()
         : prev.replyAt || null,
+      // 말풍선 둘째 줄에 "✅ ~" 형태로 보여줄 답변 마지막 문장 요약
+      replyGist,
+      // 한도 도달 알림의 원문(리셋 시각 등)을 말풍선에 그대로 보여줄 수 있게 남겨둔다
+      message: state === 'limit' ? squash(ctx.message) : null,
       tool: ctx.tool_name || null,
       hookEvent: ctx.hook_event_name || null,
       cwd: ctx.cwd || prev.cwd || null,

@@ -29,7 +29,6 @@ class SpriteAnimator {
     this.displayH = 160;
     this.rafId = null;
     this.lastStep = 0;
-    this.staticFrame = false; // true면 애니메이션 재생을 멈추고 한 프레임에 고정
   }
 
   /** 화면에 그릴 높이(px). 기준 칸 높이를 이 값에 맞춘다. */
@@ -56,32 +55,13 @@ class SpriteAnimator {
   }
 
   setClip(name) {
-    if (!this.staticFrame && this.clipName === name) return;
+    if (this.clipName === name) return;
     const clip = this.def.clips[name];
     if (!clip) return;
     this.clipName = name;
     this.clip = clip;
     this.frameIndex = 0;
     this.lastStep = 0;
-    this.staticFrame = false;
-    this.draw();
-  }
-
-  /**
-   * 애니메이션 재생 없이 특정 클립의 특정 프레임 하나만 고정해서 보여준다.
-   * 마우스 각도를 따라가는 시선(lookRight/lookLeft)처럼, "동작"이 아니라
-   * "지금 이 각도의 정지 이미지"를 보여줘야 할 때 쓴다.
-   */
-  setStaticFrame(name, frameIndex) {
-    const clip = this.def.clips[name];
-    if (!clip) return;
-    const n = clip.frames.length;
-    const idx = ((frameIndex % n) + n) % n;
-    if (this.staticFrame && this.clipName === name && this.frameIndex === idx) return;
-    this.clipName = name;
-    this.clip = clip;
-    this.frameIndex = idx;
-    this.staticFrame = true;
     this.draw();
   }
 
@@ -100,7 +80,7 @@ class SpriteAnimator {
     if (this.rafId !== null) return;
     const tick = (now) => {
       this.rafId = requestAnimationFrame(tick);
-      if (!this.clip || this.staticFrame) return;
+      if (!this.clip) return;
       const interval = 1000 / (this.clip.fps || 6);
       if (now - this.lastStep < interval) return;
       this.lastStep = now;

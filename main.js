@@ -2,6 +2,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell } = 
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFile } = require('child_process');
 
 // ---------------------------------------------------------------------------
 // 1. 데이터 디렉토리 (~/.claude-pet)
@@ -31,7 +32,7 @@ const DEFAULT_CONFIG = {
 // 시트 로딩에 실패했을 때만 쓰는 기본 비율
 const FALLBACK_ASPECT = { w: 160, h: 174 };
 const BASE_PET_HEIGHT = 150; // scale 1.0일 때 펫 높이(px)
-const BUBBLE_W = 330;
+const BUBBLE_W = 220; // renderer/style.css의 #bubble max-width와 맞춘다
 const BUBBLE_SPACE = 210; // 말풍선이 펼쳐졌을 때 필요한 위쪽 여백
 const PANEL_SPACE = 130; // 펫을 클릭해서 여는 설정 패널에 필요한 아래쪽 여백
 
@@ -333,6 +334,78 @@ function setupClaudeCodeHooks() {
 }
 
 // ---------------------------------------------------------------------------
+// 5.5 말풍선에서 원래 화면(VSCode/터미널)으로 이동하기 (Windows 전용)
+//
+// 세션이 어느 OS 창인지는 직접 알 방법이 없어서, cwd의 마지막 폴더 이름이
+// 창 제목에 들어 있을 거라 가정하고 부분 일치로 찾는다. VSCode는 보통
+// 창 제목에 폴더 이름이 들어가 있어 잘 맞지만, 터미널은 프롬프트가 제목을
+// 따로 안 바꿔주면 못 찾을 수 있다 — 그런 경우는 조용히 실패한다.
+// SetForegroundWindow를 직접 부르면 Windows가 "다른 프로세스가 포커스를
+// 뺏는 것"을 막아서 거의 항상 무시되므로, WScript.Shell의 AppActivate로
+// 우회한다(같은 이유로 이 방식이 훨씬 잘 먹힌다).
+// ---------------------------------------------------------------------------
+function psEscape(s) {
+  return String(s).replace(/'/g, "''");
+}
+
+function focusSourceWindow(session) {
+  if (!session || !session.cwd || process.platform !== 'win32') return;
+  const folder = path.basename(session.cwd);
+  if (!folder) return;
+  const ps = `$shell = New-Object -ComObject WScript.Shell; [void]$shell.AppActivate('${psEscape(folder)}')`;
+  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], () => {
+    // 못 찾아도 Claude Code나 펫 동작에 영향이 없어야 하므로 조용히 무시
+  });
+}
+
+// 답변 도착 후 그 창이 포커스될 때까지 지켜본다
+const FOCUS_WATCH_POLL_MS = 1500;
+const FOCUS_WATCH_TIMEOUT_MS = 5 * 60 * 1000; // 5분 넘게 안 돌아오면 그만 지켜본다
+const GET_FOREGROUND_TITLE_PS = `Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class ClaudePetFocus {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+}
+'@
+$h = [ClaudePetFocus]::GetForegroundWindow()
+$sb = New-Object System.Text.StringBuilder 256
+[ClaudePetFocus]::GetWindowText($h, $sb, 256) | Out-Null
+Write-Output $sb.ToString()`;
+
+let focusWatch = null; // { sessionId, folder, timer, deadline }
+
+function stopFocusWatch() {
+  if (focusWatch) {
+    clearInterval(focusWatch.timer);
+    focusWatch = null;
+  }
+}
+
+function startFocusWatch(session) {
+  stopFocusWatch();
+  if (!session || !session.cwd || !session.sessionId || process.platform !== 'win32') return;
+  const folder = path.basename(session.cwd).toLowerCase();
+  if (!folder) return;
+
+  const deadline = Date.now() + FOCUS_WATCH_TIMEOUT_MS;
+  const check = () => {
+    if (!focusWatch || Date.now() > deadline) return stopFocusWatch();
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', GET_FOREGROUND_TITLE_PS], (err, stdout) => {
+      if (err || !focusWatch) return;
+      const title = String(stdout || '').trim().toLowerCase();
+      if (title && title.includes(folder)) {
+        stopFocusWatch();
+        mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('source-window-focused', session.sessionId);
+      }
+    });
+  };
+  focusWatch = { timer: setInterval(check, FOCUS_WATCH_POLL_MS) };
+}
+
+// ---------------------------------------------------------------------------
 // 6. 트레이 메뉴
 // ---------------------------------------------------------------------------
 function buildTrayMenu() {
@@ -442,6 +515,9 @@ ipcMain.handle('cycle-session', () => {
 });
 ipcMain.handle('setup-hooks', () => ({ ok: true, path: setupClaudeCodeHooks() }));
 ipcMain.on('quit-app', () => app.exit(0));
+
+ipcMain.on('focus-session-window', (_e, session) => focusSourceWindow(session));
+ipcMain.on('watch-for-focus', (_e, session) => startFocusWatch(session));
 
 ipcMain.on('set-interactive', (_e, on) => {
   if (!mainWindow || mainWindow.isDestroyed()) return;

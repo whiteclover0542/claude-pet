@@ -13,6 +13,7 @@
       <div id="bubble-head">
         <span id="bubble-title">새 채팅</span>
         <span id="bubble-source"></span>
+        <button id="bubble-dismiss" type="button" aria-label="닫기">×</button>
       </div>
       <div id="bubble-state">대기 중</div>
       <div id="session-dots" class="hidden" title="다른 세션으로 전환"></div>
@@ -33,8 +34,9 @@
       <div class="settings-row">
         <span class="settings-label">크기</span>
         <button id="scale-down" type="button" aria-label="작게">−</button>
-        <span id="scale-value">100%</span>
+        <input id="scale-slider" type="range" min="50" max="200" step="1" value="100" aria-label="크기 슬라이더" />
         <button id="scale-up" type="button" aria-label="크게">+</button>
+        <span id="scale-value">100%</span>
       </div>
       <div class="settings-row">
         <span class="settings-label">캐릭터</span>

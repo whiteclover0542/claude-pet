@@ -4,21 +4,24 @@ const bubble = document.getElementById('bubble');
 const titleEl = document.getElementById('bubble-title');
 const sourceEl = document.getElementById('bubble-source');
 const stateEl = document.getElementById('bubble-state');
+const dismissBtn = document.getElementById('bubble-dismiss');
 const dotsEl = document.getElementById('session-dots');
 const gearEl = document.getElementById('gear-btn');
 const panelEl = document.getElementById('settings-panel');
 const scaleValueEl = document.getElementById('scale-value');
 const scaleDownBtn = document.getElementById('scale-down');
 const scaleUpBtn = document.getElementById('scale-up');
+const scaleSliderEl = document.getElementById('scale-slider');
 const characterListEl = document.getElementById('character-list');
 const setupHooksBtn = document.getElementById('setup-hooks-btn');
 const quitBtn = document.getElementById('quit-btn');
 
-const STATE_LABEL = {
-  idle: '대기 중',
-  thinking: '생각 중',
-  working: '작업 중',
-  notify: '확인해 주세요!'
+// working 상태일 때 어떤 도구를 쓰고 있느냐에 따라 둘째 줄 문구를 다르게 보여준다
+const WORKING_TOOL_LABEL = {
+  Bash: '명령어 쓰는 중',
+  BashOutput: '명령어 쓰는 중',
+  KillShell: '명령어 쓰는 중',
+  AskUserQuestion: '질문하는 중'
 };
 
 // 어디서 돌고 있는 세션인지 (트랜스크립트의 entrypoint 값)
@@ -34,21 +37,22 @@ const IDLE_HIDE_MS = 6000;
 const CLICK_DRAG_THRESHOLD = 6;
 const SCALE_MIN = 0.5;
 const SCALE_MAX = 2.0;
-const SCALE_STEP = 0.25;
+const SCALE_STEP = 0.05; // -/+ 버튼 한 번에 움직이는 양. 슬라이더는 1%씩 더 세밀하게 움직인다
 
 // --- 클립(애니메이션) 전환 타이밍 ------------------------------------------
-// 시트에 있는 11개 동작을 상태·이벤트·마우스 위치에 따라 자연스럽게
-// 갈아탄다. (clips: idle, walkRight/Left, wave, jump, sulky, poke,
-// working, ponder, lookRight/Left)
+// 시트에 있는 동작들을 상태·이벤트에 따라 자연스럽게 갈아탄다.
+// (clips: idle, walkRight/Left, wave, jump, sulky, poke, working, ponder)
 //
 // 우선순위 (위에 있을수록 우선, 끝나면 자동으로 아래 단계로 돌아간다)
 //   1. 드래그 중              → 드래그 방향으로 걷기 (walkRight/Left)
 //   2. 답변 도착               → jump
-//   3. 마우스가 펫 가까이(주변) 있음 → look (애니메이션이 아니라 각도별 정지
-//      프레임). 마우스가 펫 위에 정확히 올라오면 오히려 정면(기본 모션)
-//   4. notify/thinking/working/idle → wave/ponder/working/idle
+//   3. notify/thinking/working/idle → wave/ponder/working/idle
 //      idle이 한동안 이어지면 poke를 한 번씩 짧게 끼워 넣는다
 //      세션이 아예 없으면(할 게 없으면) sulky
+//
+// (예전엔 마우스가 펫 근처에 오면 시선을 그쪽으로 돌리는 look 모션이
+// 있었는데, 실제 마우스 각도와 눈이 보는 방향이 안 맞아서 어색해 통째로
+// 없앴다.)
 const JUMP_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
 const POKE_MIN_GAP_MS = 20000; // idle 상태에서 다음 poke까지 최소 대기
 const POKE_MAX_GAP_MS = 40000; // idle 상태에서 다음 poke까지 최대 대기
@@ -62,13 +66,21 @@ let pinned = false; // 마우스를 올리고 있으면 말풍선을 접지 않�
 let hasSession = false; // 돌아가는 세션이 있어야만 마우스오버로 말풍선을 연다
 let loadedCharacter = null;
 let currentConfig = null;
+// 답변이 막 도착했는데 그 화면(VSCode/터미널)이 아직 포커스가 아니면,
+// 사용자가 그 화면으로 돌아올 때까지 말풍선을 계속 띄워 둔다.
+let waitingFocusSessionId = null;
+// ×로 닫은 뒤엔, 같은 질문(턴)이 이어지는 동안은 다시 안 띄운다.
+// 새 질문이 오면(session.prompt가 바뀌면) 자동으로 풀린다.
+let dismissedKey = null;
+function sessionKey(session) {
+  return session ? `${session.sessionId}::${session.prompt || ''}` : null;
+}
 
 // --- 클립 상태 머신 --------------------------------------------------------
 let lastSession = null; // 가장 최근에 받은 session 객체 (없으면 null)
 let lastClipState = null; // idle/thinking/working/notify/none 중 무엇으로 마지막에 갈아탔는지
 let jumpUntil = 0; // 이 시각까지는 jump를 최우선으로 재생 (답변 도착)
 let dragDirection = null; // 드래그 중일 때만 'walkRight'|'walkLeft'
-let hovering = false; // 마우스가 펫 위에 있는 동안 각도별 정지 프레임을 보여준다
 let pokeAt = 0; // 다음 poke를 재생할 예정 시각 (idle 상태에서만 의미 있음)
 
 function scheduleNextPoke(now) {
@@ -79,34 +91,33 @@ function scheduleNextPoke(now) {
 function updateClip() {
   if (!sprite) return;
   const now = Date.now();
-  // 세션이 아예 없으면 idle이 아니라 'none'으로 구분해야 sulky로 갈 수 있다
+  // 세션이 아예 없으면 'none'이지만, 할 일이 없는 것뿐이지 시무룩할 이유는
+  // 아니라서(시무룩은 토큰 한도 도달 때만) idle과 똑같이 취급한다.
   const state = lastSession ? lastSession.state : 'none';
+  const idling = state === 'idle' || state === 'none';
 
   if (state !== lastClipState) {
     lastClipState = state;
-    if (state === 'idle') scheduleNextPoke(now);
+    if (idling) scheduleNextPoke(now);
   }
 
   // 1순위: 펫을 드래그해서 옮기는 중이면 그 방향으로 걷는다
   if (dragDirection) return sprite.setClip(dragDirection);
   // 2순위: 답변이 막 도착했으면 반긴다
   if (now < jumpUntil) return sprite.setClip('jump');
-  // 3순위: 마우스가 펫 위에 있으면 (정지 프레임은 mousemove 핸들러가 직접
-  // sprite.setStaticFrame으로 그리므로, 여기서는 다른 클립으로 덮어쓰지 않는다)
-  if (hovering) return;
 
+  if (state === 'limit') return sprite.setClip('sulky'); // 토큰 한도 도달했을 때만 시무룩
   if (state === 'notify') return sprite.setClip('wave');
   if (state === 'thinking') return sprite.setClip('ponder');
   if (state === 'working') return sprite.setClip('working');
-  if (state === 'idle') {
+  if (idling) {
     if (now >= pokeAt) {
       if (now < pokeAt + POKE_PLAY_MS) return sprite.setClip('poke');
       scheduleNextPoke(now); // poke가 끝났으면 다음 번을 다시 예약
     }
     return sprite.setClip('idle');
   }
-  // 세션이 아예 없어서 할 일이 없을 때
-  sprite.setClip('sulky');
+  sprite.setClip('idle');
 }
 
 // setInterval은 포커스 없는 이 창에서 스로틀링되어 거의 안 돌기 때문에,
@@ -143,13 +154,26 @@ function bubbleTitle(session) {
   return '대화 준비 중…';
 }
 
-/** 상태별 두 번째 줄 문구 */
+/**
+ * 말풍선 둘째 줄. 처리 중인 요청이 없으면 비워 두되, 방금 답변이 막
+ * 도착한 직후라면 "✅ <답변 마지막 문장>"으로 완료를 알려준다. 요청이
+ * 있을 때는 지금 정확히 뭘 하고 있는지 단계별로 보여준다.
+ */
 function stateLine(session) {
-  const base = STATE_LABEL[session.state] || '';
-  if (session.state === 'working' && session.tool) return `${base} · ${session.tool}`;
-  // 생각 중일 땐 무엇을 물어봤는지 보여준다 (제목에 아직 답변/제목이 없을 때는 중복이니 생략)
-  if (session.state === 'thinking' && session.prompt && session.title) return truncate(session.prompt, 40);
-  return base;
+  switch (session.state) {
+    case 'limit':
+      return session.message || '토큰 한도에 도달했어요…';
+    case 'notify':
+      return '확인해 주세요!';
+    case 'thinking':
+      return '생각 중';
+    case 'working':
+      return WORKING_TOOL_LABEL[session.tool] || '작업 중';
+    case 'idle':
+      return session.replyGist ? `✅ ${session.replyGist}` : '';
+    default:
+      return ''; // 요청이 없을 때는 비운다
+  }
 }
 
 function applySession(payload) {
@@ -173,10 +197,15 @@ function applySession(payload) {
   sourceEl.textContent = SOURCE_LABEL[session.entrypoint] || '';
   stateEl.textContent = stateLine(session);
 
-  // 새 답변이 도착하면 펫이 잠깐 반긴다 (말풍선 제목에는 이미 요약이 뜬다)
+  // 새 답변이 도착하면 펫이 잠깐 반긴다 (말풍선 둘째 줄에는 이미 ✅ 요약이 뜬다)
   if (session.reply && session.replyAt && session.replyAt !== lastReplyAt) {
     lastReplyAt = session.replyAt;
     jumpUntil = Date.now() + JUMP_DURATION_MS;
+    // 그 화면(VSCode/터미널)이 지금 포커스가 아니면, 돌아올 때까지 말풍선을 붙잡아 둔다
+    if (session.cwd && session.entrypoint !== 'sdk') {
+      waitingFocusSessionId = session.sessionId;
+      window.claudePet.watchForFocus(session);
+    }
   }
 
   updateClip();
@@ -194,9 +223,15 @@ function applySession(payload) {
     dotsEl.classList.add('hidden');
   }
 
+  const key = sessionKey(session);
+  if (dismissedKey && dismissedKey !== key) dismissedKey = null; // 새 질문이 오면 해제
+
+  if (dismissedKey === key) return; // ×로 닫은 그 질문이 아직 안 끝났다 — 다시 띄우지 않는다
+
   setBubbleVisible(true);
   clearTimeout(hideTimer);
-  if (session.state === 'idle' && !pinned) {
+  // 그 화면으로 아직 안 돌아왔으면(waitingFocusSessionId) 자동으로 접지 않는다
+  if (session.state === 'idle' && !pinned && waitingFocusSessionId !== session.sessionId) {
     hideTimer = setTimeout(() => {
       if (!pinned) setBubbleVisible(false);
     }, IDLE_HIDE_MS);
@@ -220,14 +255,9 @@ function updateInteractive(el) {
 
 document.addEventListener('mousemove', (e) => {
   updateInteractive(document.elementFromPoint(e.clientX, e.clientY));
-  updateHover(e);
 });
 document.addEventListener('mouseleave', () => {
   updateInteractive(null);
-  if (hovering) {
-    hovering = false;
-    updateClip();
-  }
 });
 
 bubble.addEventListener('mouseenter', () => {
@@ -247,63 +277,25 @@ petEl.addEventListener('mouseleave', () => {
   pinned = false;
 });
 
-// --- 마우스 각도를 따라가는 시선 -------------------------------------------
-// 마우스가 펫 "위"에 정확히 있으면 오히려 정면(기본 모션)을 보여주고,
-// 펫 가장자리에서 이만큼 떨어진 "주변"에 있을 때만 그쪽을 바라본다 —
-// 사람이 다가오면 쳐다보고, 만지고 있을 땐 그냥 얌전히 있는 느낌.
-const HOVER_MARGIN_PX = 26;
-
-// lookRight(row9)는 0°~157.5°, lookLeft(row10)는 180°~337.5°를 22.5° 간격
-// 8프레임씩 담고 있다 (합쳐서 16방향 전체 원). "동작을 재생"하는 게 아니라
-// 지금 마우스가 있는 각도의 정지 프레임 하나를 바로 보여준다.
-const LOOK_FRAMES = [
-  ...Array.from({ length: 8 }, (_, i) => ({ clip: 'lookRight', frame: i, angle: i * 22.5 })),
-  ...Array.from({ length: 8 }, (_, i) => ({ clip: 'lookLeft', frame: i, angle: 180 + i * 22.5 }))
-];
-
-/** 점(x,y)에서 사각형 가장자리까지의 최단 거리. 사각형 안이면 0. */
-function distanceToRect(x, y, rect) {
-  const dx = Math.max(rect.left - x, 0, x - rect.right);
-  const dy = Math.max(rect.top - y, 0, y - rect.bottom);
-  return Math.hypot(dx, dy);
-}
-
-function updateHover(e) {
-  const rect = petEl.getBoundingClientRect();
-  const dist = distanceToRect(e.clientX, e.clientY, rect);
-  // dist === 0: 마우스가 펫 몸통 위 → 쳐다보지 않고 정면 유지
-  const near = dist > 0 && dist <= HOVER_MARGIN_PX;
-
-  if (near) {
-    hovering = true;
-    updateLookFrame(e, rect);
-  } else if (hovering) {
-    hovering = false;
-    updateClip();
-  }
-}
-
-function updateLookFrame(e, rect) {
-  if (!sprite) return;
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  let angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI; // -180~180, 0°=오른쪽
-  if (angle < 0) angle += 360; // 0~360
-
-  let best = LOOK_FRAMES[0];
-  let bestDiff = 360;
-  for (const f of LOOK_FRAMES) {
-    const diff = Math.min(Math.abs(angle - f.angle), 360 - Math.abs(angle - f.angle));
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = f;
-    }
-  }
-  sprite.setStaticFrame(best.clip, best.frame);
-}
-
-dotsEl.addEventListener('click', () => {
+dotsEl.addEventListener('click', (e) => {
+  e.stopPropagation();
   window.claudePet.cycleSession();
+});
+
+// 말풍선을 누르면(점·닫기 버튼 제외) 그 대화가 돌아가는 화면(VSCode/터미널)으로 이동한다
+bubble.addEventListener('click', (e) => {
+  if (e.target.closest('#session-dots') || e.target.closest('#bubble-dismiss')) return;
+  if (lastSession && lastSession.cwd) window.claudePet.focusSessionWindow(lastSession);
+});
+
+// 말풍선 닫기 — 지금 이 질문(턴)이 끝날 때까지는 다시 안 뜨고,
+// 새 질문이 오면(session.prompt가 바뀌면) 자동으로 다시 정상 동작한다
+dismissBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  dismissedKey = sessionKey(lastSession);
+  clearTimeout(hideTimer);
+  waitingFocusSessionId = null; // 강제로 닫았으니 화면 복귀를 기다리던 것도 그만둔다
+  setBubbleVisible(false);
 });
 
 // --- 톱니바퀴 → 설정 패널: 2단계로 연다 -----------------------------------
@@ -332,12 +324,18 @@ gearEl.addEventListener('click', (e) => {
 
 document.addEventListener('mousedown', (e) => {
   if (!gearOpen && !panelOpen) return;
-  if (e.target.closest('#pet')) return; // 펫(톱니바퀴 포함)은 각자 처리
+  // 펫(톱니바퀴 포함)과 설정 패널 자체는 각자 처리한다. 패널은 #pet의
+  // 형제 요소라 여기 포함하지 않으면, 패널 안 버튼을 누르는 mousedown이
+  // click보다 먼저 패널을 닫아버려서 정작 그 클릭이 씹히는 문제가 있었다.
+  if (e.target.closest('#pet') || e.target.closest('#settings-panel')) return;
   setGearVisible(false);
 });
 
+let sliderDragging = false;
+
 function renderScale(scale) {
   scaleValueEl.textContent = `${Math.round(scale * 100)}%`;
+  if (!sliderDragging) scaleSliderEl.value = Math.round(scale * 100);
 }
 
 function renderCharacterList(cfg) {
@@ -363,6 +361,28 @@ scaleUpBtn.addEventListener('click', () => {
   window.claudePet.setConfig({ scale: next });
 });
 
+// 슬라이더는 1%(0.01) 단위로 세밀하게 움직인다. 드래그 중 매 픽셀마다
+// IPC를 쏘면 창 리사이즈가 너무 잦아지니 애니메이션 프레임당 한 번으로 묶는다.
+let scalePending = false;
+let scalePendingValue = null;
+function commitScale(value) {
+  scalePendingValue = value;
+  if (scalePending) return;
+  scalePending = true;
+  requestAnimationFrame(() => {
+    scalePending = false;
+    window.claudePet.setConfig({ scale: scalePendingValue });
+  });
+}
+
+scaleSliderEl.addEventListener('pointerdown', () => { sliderDragging = true; });
+window.addEventListener('pointerup', () => { sliderDragging = false; });
+scaleSliderEl.addEventListener('input', () => {
+  const next = Math.min(SCALE_MAX, Math.max(SCALE_MIN, +scaleSliderEl.value / 100));
+  scaleValueEl.textContent = `${Math.round(next * 100)}%`;
+  commitScale(next);
+});
+
 // 트레이 아이콘이 안 보이는 환경(원격 데스크톱 등)도 있어서, 트레이에만
 // 있던 핵심 기능(연동 설정·종료)을 설정 패널에도 넣어 둔다.
 setupHooksBtn.addEventListener('click', () => window.claudePet.setupHooks());
@@ -373,13 +393,22 @@ quitBtn.addEventListener('click', () => window.claudePet.quitApp());
 // 경계를 기준으로 화면 밖 이탈을 막으면 펫이 코너 근처에도 못 가고 막혀버린다.
 // 그래서 펫이 창 안에서 실제로 차지하는 위치(여백)를 재서 메인에 같이 넘기고,
 // 메인은 "펫이 보이는 영역"만 화면 안에 있도록 clamp한다.
+//
+// 말풍선·설정 패널은 hidden이어도 opacity만 0일 뿐 레이아웃 자리는 그대로
+// 차지하므로, 펫만 기준으로 재면 펫은 화면 안인데 말풍선이 열렸을 때
+// 위쪽이나 옆으로 화면 밖에 걸치는 경우가 생긴다. 셋을 모두 합친 영역을
+// 기준으로 삼아야 말풍선이 열려도 항상 화면 안에 들어온다.
 function petOffset() {
-  const rect = petEl.getBoundingClientRect();
+  const rects = [petEl, bubble, panelEl].map((el) => el.getBoundingClientRect());
+  const left = Math.min(...rects.map((r) => r.left));
+  const top = Math.min(...rects.map((r) => r.top));
+  const right = Math.max(...rects.map((r) => r.right));
+  const bottom = Math.max(...rects.map((r) => r.bottom));
   return {
-    top: rect.top,
-    left: rect.left,
-    right: window.innerWidth - rect.right,
-    bottom: window.innerHeight - rect.bottom
+    top,
+    left,
+    right: window.innerWidth - right,
+    bottom: window.innerHeight - bottom
   };
 }
 
@@ -462,6 +491,18 @@ window.claudePet.onConfigUpdated(async (cfg) => {
 });
 
 window.claudePet.onSessionUpdated(applySession);
+
+// 답변 도착 후 기다리던 화면(VSCode/터미널)이 실제로 포커스를 받으면 전달된다
+window.claudePet.onSourceWindowFocused((sessionId) => {
+  if (waitingFocusSessionId !== sessionId) return;
+  waitingFocusSessionId = null;
+  if (lastSession && lastSession.sessionId === sessionId && lastSession.state === 'idle' && !pinned) {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!pinned) setBubbleVisible(false);
+    }, IDLE_HIDE_MS);
+  }
+});
 
 window.claudePet.onSetupResult((result) => {
   titleEl.textContent = result.ok ? 'Claude Code 연동 완료' : '연동 실패';
