@@ -53,7 +53,7 @@ const SCALE_STEP = 0.05; // -/+ 버튼 한 번에 움직이는 양. 슬라이더
 // (예전엔 마우스가 펫 근처에 오면 시선을 그쪽으로 돌리는 look 모션이
 // 있었는데, 실제 마우스 각도와 눈이 보는 방향이 안 맞아서 어색해 통째로
 // 없앴다.)
-const JUMP_DURATION_MS = 3500; // 답변이 막 도착했을 때 반기는 시간
+const JUMP_DURATION_MS = 7000; // 답변이 막 도착했을 때 반기는 시간
 const POKE_MIN_GAP_MS = 20000; // idle 상태에서 다음 poke까지 최소 대기
 const POKE_MAX_GAP_MS = 40000; // idle 상태에서 다음 poke까지 최대 대기
 const POKE_PLAY_MS = 1500; // poke를 보여주는 시간
